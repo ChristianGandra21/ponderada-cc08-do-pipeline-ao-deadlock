@@ -145,7 +145,120 @@ Conta: T_novo ≈ 2,275 ms
 | V, média | 1,482 ms | 3,518 ms (70,4%) | Sim |
 | V, pior caso com atraso do SO | 4,482 ms | 0,518 ms (10,4%) | Sim |
 
-## A2. Pipeline
+## A2. Pipeline: o loop do filtro
+
+### A2.1 Dependências de dados RAW
+
+> Liste as dependências de dados (RAW) do trecho: qual instrução depende de qual, por qual registrador.
+
+Uma dependência RAW (Read After Write) ocorre quando uma instrução precisa ler um registrador escrito por uma instrução anterior. No trecho, as dependências são:
+
+| Instrução que escreve | Instrução que lê | Registrador | Valor transmitido |
+| --- | --- | --- | --- |
+| 1. `lw x5, 0(x10)` | 2. `add x6, x6, x5` | `x5` | Amostra nova lida do sensor |
+| 2. `add x6, x6, x5` | 4. `sub x6, x6, x7` | `x6` | Soma atualizada com a amostra nova |
+| 3. `lw x7, 0(x11)` | 4. `sub x6, x6, x7` | `x7` | Amostra mais antiga do buffer |
+| 4. `sub x6, x6, x7` | 5. `sw x6, 0(x12)` | `x6` | Soma final a ser gravada |
+
+As instruções 6 e 7 atualizam os ponteiros `x10` e `x11` depois dos loads. Não criam dependência RAW com instrução posterior no trecho; ao reordená-las, mantenho cada incremento depois do load que usa aquele ponteiro.
+
+### A2.2 Pipeline sem forwarding
+
+> Sem forwarding: desenhe o diagrama do pipeline ciclo a ciclo e diga quantos ciclos o trecho leva do primeiro IF ao último WB.
+
+**Premissas:** o pipeline tem os estágios IF, ID, EX, MEM e WB. Sem forwarding, a instrução consumidora só pode ler o valor no banco de registradores em ID depois que a produtora o escreveu em WB. Como a escrita ocorre na primeira metade do ciclo e a leitura na segunda, a consumidora pode fazer ID no mesmo ciclo de WB. `ID (espera)` marca uma instrução parada no decodificador; `IF (mantida)` marca a próxima instrução esperando para avançar; `Bolha` é um estágio EX vazio.
+
+| Ciclo | IF | ID | EX | MEM | WB |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | I1 | — | — | — | — |
+| 2 | I2 | I1 | — | — | — |
+| 3 | I3 | I2 (espera x5) | I1 | — | — |
+| 4 | I3 (mantida) | I2 (espera x5) | Bolha | I1 | — |
+| 5 | I3 (mantida) | I2 | Bolha | — | I1 |
+| 6 | I4 | I3 | I2 | — | — |
+| 7 | I5 | I4 (espera x6 e x7) | I3 | I2 | — |
+| 8 | I5 (mantida) | I4 (espera x6 e x7) | Bolha | I3 | I2 |
+| 9 | I5 (mantida) | I4 | Bolha | — | I3 |
+| 10 | I6 | I5 (espera x6) | I4 | — | — |
+| 11 | I6 (mantida) | I5 (espera x6) | Bolha | I4 | — |
+| 12 | I6 (mantida) | I5 | Bolha | — | I4 |
+| 13 | I7 | I6 | I5 | — | — |
+| 14 | — | I7 | I6 | I5 | — |
+| 15 | — | — | I7 | I6 | I5 |
+| 16 | — | — | — | I7 | I6 |
+| 17 | — | — | — | — | I7 |
+
+O pipeline ideal de 7 instruções teria `7 + (5 − 1) = 11` ciclos. Sem forwarding, as dependências acrescentam 6 ciclos de espera: 2 para `I1 → I2`, 2 para `I2/I3 → I4` e 2 para `I4 → I5`.
+
+**Resposta:** **11 + 6 = 17 ciclos**, do primeiro IF de I1 ao último WB de I7.
+
+### A2.3 Pipeline com forwarding
+
+> Com forwarding: mesmo diagrama e total. Qual dependência continua causando bolha mesmo com forwarding, e por quê?
+
+Com forwarding, o resultado pode seguir diretamente da saída de uma etapa para a entrada de outra sem esperar pela escrita e leitura no banco de registradores. Ainda há uma bolha de load-use quando a instrução seguinte precisa imediatamente do dado carregado: o valor de `lw` só fica disponível ao fim de MEM. Isso ocorre em `I1 → I2` (`x5`) e `I3 → I4` (`x7`). Considero forwarding completo, inclusive do dado usado por `sw`.
+
+| Ciclo | IF | ID | EX | MEM | WB |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | I1 | — | — | — | — |
+| 2 | I2 | I1 | — | — | — |
+| 3 | I3 | I2 (detecta load-use x5) | I1 | — | — |
+| 4 | I3 (mantida) | I2 (1 bolha) | Bolha | I1 | — |
+| 5 | I4 | I3 | I2 | — | I1 |
+| 6 | I5 | I4 (detecta load-use x7) | I3 | I2 | — |
+| 7 | I5 (mantida) | I4 (1 bolha) | Bolha | I3 | I2 |
+| 8 | I6 | I5 | I4 | — | I3 |
+| 9 | I7 | I6 | I5 | I4 | — |
+| 10 | — | I7 | I6 | I5 | I4 |
+| 11 | — | — | I7 | I6 | I5 |
+| 12 | — | — | — | I7 | I6 |
+| 13 | — | — | — | — | I7 |
+
+O pipeline ideal leva 11 ciclos. As duas dependências load-use acrescentam uma bolha cada, então o total é `11 + 2 = 13` ciclos.
+
+**Resposta:** **13 ciclos.** As dependências `lw x5 → add` e `lw x7 → sub` ainda geram uma bolha cada, pois o load só disponibiliza o dado ao fim de MEM; as demais dependências são atendidas pelo forwarding.
+
+### A2.4 Reordenação sem bolhas com forwarding
+
+> Reordene as instruções, sem mudar o resultado, para eliminar todas as bolhas com forwarding. Mostre a nova ordem e o novo total de ciclos.
+
+Aproveito as instruções independentes de atualização dos ponteiros para separar cada `lw` de sua instrução consumidora. Mantenho cada atualização de ponteiro depois do load correspondente e a soma antes da subtração e da gravação:
+
+| Nova ordem | Instrução original | Instrução |
+| ---: | ---: | --- |
+| 1 | 1 | `lw x5, 0(x10)` |
+| 2 | 3 | `lw x7, 0(x11)` |
+| 3 | 6 | `addi x10, x10, 4` |
+| 4 | 7 | `addi x11, x11, 4` |
+| 5 | 2 | `add x6, x6, x5` |
+| 6 | 4 | `sub x6, x6, x7` |
+| 7 | 5 | `sw x6, 0(x12)` |
+
+Assim, há instruções independentes entre cada load e seu uso. A dependência entre `add` e `sub` é resolvida pelo forwarding; a dependência entre `sub` e `sw` também é resolvida pelo forwarding completo considerado acima. Não há bolhas:
+
+| Ciclo | IF | ID | EX | MEM | WB |
+| ---: | --- | --- | --- | --- | --- |
+| 1 | R1 | — | — | — | — |
+| 2 | R2 | R1 | — | — | — |
+| 3 | R3 | R2 | R1 | — | — |
+| 4 | R4 | R3 | R2 | R1 | — |
+| 5 | R5 | R4 | R3 | R2 | R1 |
+| 6 | R6 | R5 | R4 | R3 | R2 |
+| 7 | R7 | R6 | R5 | R4 | R3 |
+| 8 | — | R7 | R6 | R5 | R4 |
+| 9 | — | — | R7 | R6 | R5 |
+| 10 | — | — | — | R7 | R6 |
+| 11 | — | — | — | — | R7 |
+
+**Resposta:** a nova ordem preserva o resultado e elimina as bolhas com forwarding. O total é `7 + (5 − 1) =` **11 ciclos**.
+
+### Resumo dos ciclos da A2
+
+| Cenário | Bolhas | Total |
+| --- | ---: | ---: |
+| Sem forwarding | 6 | 17 ciclos |
+| Com forwarding | 2 | 13 ciclos |
+| Reordenado com forwarding | 0 | 11 ciclos |
 
 ## A3. Processos e threads
 
