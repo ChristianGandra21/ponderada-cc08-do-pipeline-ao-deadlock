@@ -115,12 +115,10 @@ Conta: T_novo ≈ 2,275 ms
 
 > Em até cinco linhas: por que a Plataforma V precisa de cache e a H funciona sem? Use a ideia de gargalo de Von Neumann.
 
-- A V usa organização Von Neumann e faz 1,3 acessos à memória por instrução; sem cache, todos pagariam a latência de DRAM.
+- A V usa organização Von Neumann e faz 1,3 acessos à memória por instrução; sem cache, todos os acessos pagariam a latência da DRAM.
 - Sem cache: CPI = 1,0 + (1,3 × 120) = 157; tempo = (140.000 × 157) ÷ 1,2 GHz ≈ 18,317 ms, acima de 5 ms.
 - Com cache, CPI cai para 12,7 e o tempo médio estimado cai para 1,482 ms; o caminho compartilhado de instruções e dados continua sendo um gargalo.
 - A H usa Harvard e SRAM interna de 1 ciclo, então não tem a grande diferença de latência da DRAM externa que a cache da V precisa compensar.
-
-**Resposta:** a cache reduz o custo do caminho de memória compartilhado na V; a H usa caminhos Harvard e SRAM de 1 ciclo, por isso funciona sem cache.
 
 ### A1.5 Evidência das caches da máquina
 
@@ -128,13 +126,11 @@ Conta: T_novo ≈ 2,275 ms
 
 ![Registro da saída do comando lscpu com os tamanhos das caches L1, L2 e L3.](img/cache-lscpu.png)
 
-**O que o print mostra:** o comando `lscpu` identifica um Intel Core i5-1345U de 13ª geração. A saída informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância).
+**O que o print mostra:** rodei `lscpu` em Linux nativo (Ubuntu; sem WSL ou hipervisor detectado). O processador é um Intel Core i5-1345U de 13ª geração. A saída informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância). Os totais de L1 somam as 10 instâncias dos núcleos (2 de desempenho e 8 de eficiência).
 
 **A L1 é dividida?** Sim. Há caches L1 separadas para dados (L1d) e instruções (L1i).
 
-**Von Neumann ou Harvard?** A organização da L1 é Harvard modificada, pois mantém caches separadas de instruções e dados. Classifico o computador como Harvard modificada; essa separação na L1 não implica que as memórias principais sejam separadas.
-
-**Resposta:** a L1 é dividida em instruções e dados, e a máquina apresenta organização Harvard modificada.
+**Von Neumann ou Harvard?** A L1 é dividida (L1d e L1i); o `lscpu` também reporta L2 em quatro instâncias e L3 em uma instância. A memória principal é compartilhada por instruções e dados. Portanto, o computador tem organização **Harvard modificada**: Harvard na L1 e memória unificada na RAM.
 
 ### Resumo dos resultados da A1
 
@@ -146,6 +142,19 @@ Conta: T_novo ≈ 2,275 ms
 | V, pior caso com atraso do SO | 4,482 ms | 0,518 ms (10,4%) | Sim |
 
 ## A2. Pipeline: o loop do filtro
+
+### Premissas e legenda da A2
+
+- O pipeline tem cinco estágios: IF (busca), ID (decodificação/leitura de registradores), EX (execução), MEM (memória) e WB (escrita do resultado).
+- Em um mesmo ciclo, WB escreve na primeira metade e ID pode ler na segunda metade.
+- Sem forwarding, um consumidor só sai de ID depois da escrita do produtor em WB. Com forwarding, resultados de ALU podem ser encaminhados entre estágios; considera-se também o encaminhamento do dado de `sw`.
+- `ID*` e `IF*` indicam que a instrução está mantida naquele estágio durante uma espera. **Bolha** é uma entrada vazia inserida no pipeline e avança por EX, MEM e WB. `—` significa somente que a célula/estágio está vazio.
+
+| Distância entre produtora e consumidora | Bolhas sem forwarding |
+| --- | ---: |
+| 1 (instruções adjacentes) | 2 |
+| 2 (uma instrução no meio) | 1 |
+| 3 ou mais | 0 |
 
 ### A2.1 Dependências de dados RAW
 
@@ -166,29 +175,11 @@ As instruções 6 e 7 atualizam os ponteiros `x10` e `x11` depois dos loads. Nã
 
 > Sem forwarding: desenhe o diagrama do pipeline ciclo a ciclo e diga quantos ciclos o trecho leva do primeiro IF ao último WB.
 
-**Premissas:** o pipeline tem os estágios IF, ID, EX, MEM e WB. Sem forwarding, a instrução consumidora só pode ler o valor no banco de registradores em ID depois que a produtora o escreveu em WB. Como a escrita ocorre na primeira metade do ciclo e a leitura na segunda, a consumidora pode fazer ID no mesmo ciclo de WB. `ID (espera)` marca uma instrução parada no decodificador; `IF (mantida)` marca a próxima instrução esperando para avançar; `Bolha` é um estágio EX vazio.
+No trecho original, `I1 → I2` (`x5`) tem distância 1 e exige 2 bolhas; `I3 → I4` (`x7`) também tem distância 1 e exige 2. Para I4, há ainda `I2 → I4` (`x6`), com distância 2 e exigência de 1 bolha. Como I4 precisa dos dois operandos, vale a dependência mais restritiva: 2 bolhas, não a soma 2 + 1. Por fim, `I4 → I5` (`x6`) tem distância 1 e exige 2. Total: 6 bolhas.
 
-| Ciclo | IF | ID | EX | MEM | WB |
-| ---: | --- | --- | --- | --- | --- |
-| 1 | I1 | — | — | — | — |
-| 2 | I2 | I1 | — | — | — |
-| 3 | I3 | I2 (espera x5) | I1 | — | — |
-| 4 | I3 (mantida) | I2 (espera x5) | Bolha | I1 | — |
-| 5 | I3 (mantida) | I2 | Bolha | — | I1 |
-| 6 | I4 | I3 | I2 | — | — |
-| 7 | I5 | I4 (espera x6 e x7) | I3 | I2 | — |
-| 8 | I5 (mantida) | I4 (espera x6 e x7) | Bolha | I3 | I2 |
-| 9 | I5 (mantida) | I4 | Bolha | — | I3 |
-| 10 | I6 | I5 (espera x6) | I4 | — | — |
-| 11 | I6 (mantida) | I5 (espera x6) | Bolha | I4 | — |
-| 12 | I6 (mantida) | I5 | Bolha | — | I4 |
-| 13 | I7 | I6 | I5 | — | — |
-| 14 | — | I7 | I6 | I5 | — |
-| 15 | — | — | I7 | I6 | I5 |
-| 16 | — | — | — | I7 | I6 |
-| 17 | — | — | — | — | I7 |
+![Diagrama do pipeline sem forwarding, com uma linha por instrução e por bolha e uma coluna por ciclo.](img/a2-sem-forwarding.png)
 
-O pipeline ideal de 7 instruções teria `7 + (5 − 1) = 11` ciclos. Sem forwarding, as dependências acrescentam 6 ciclos de espera: 2 para `I1 → I2`, 2 para `I2/I3 → I4` e 2 para `I4 → I5`.
+O pipeline ideal de 7 instruções leva `7 + (5 − 1) = 11` ciclos. As seis bolhas elevam o total a 17 ciclos.
 
 **Resposta:** **11 + 6 = 17 ciclos**, do primeiro IF de I1 ao último WB de I7.
 
@@ -196,61 +187,35 @@ O pipeline ideal de 7 instruções teria `7 + (5 − 1) = 11` ciclos. Sem forwar
 
 > Com forwarding: mesmo diagrama e total. Qual dependência continua causando bolha mesmo com forwarding, e por quê?
 
-Com forwarding, o resultado pode seguir diretamente da saída de uma etapa para a entrada de outra sem esperar pela escrita e leitura no banco de registradores. Ainda há uma bolha de load-use quando a instrução seguinte precisa imediatamente do dado carregado: o valor de `lw` só fica disponível ao fim de MEM. Isso ocorre em `I1 → I2` (`x5`) e `I3 → I4` (`x7`). Considero forwarding completo, inclusive do dado usado por `sw`.
+Com forwarding, resultados podem ser encaminhados sem esperar pela escrita e leitura no banco de registradores. Ainda ocorre uma bolha em cada dependência load-use (`I1 → I2` para `x5` e `I3 → I4` para `x7`): o `lw` só disponibiliza o dado ao fim de MEM, mas a instrução seguinte precisa dele no início de EX, no mesmo ciclo em que o `lw` está em MEM. O caminho de forwarding não consegue levar o dado para trás no tempo; por isso resta uma bolha por load-use.
 
-| Ciclo | IF | ID | EX | MEM | WB |
-| ---: | --- | --- | --- | --- | --- |
-| 1 | I1 | — | — | — | — |
-| 2 | I2 | I1 | — | — | — |
-| 3 | I3 | I2 (detecta load-use x5) | I1 | — | — |
-| 4 | I3 (mantida) | I2 (1 bolha) | Bolha | I1 | — |
-| 5 | I4 | I3 | I2 | — | I1 |
-| 6 | I5 | I4 (detecta load-use x7) | I3 | I2 | — |
-| 7 | I5 (mantida) | I4 (1 bolha) | Bolha | I3 | I2 |
-| 8 | I6 | I5 | I4 | — | I3 |
-| 9 | I7 | I6 | I5 | I4 | — |
-| 10 | — | I7 | I6 | I5 | I4 |
-| 11 | — | — | I7 | I6 | I5 |
-| 12 | — | — | — | I7 | I6 |
-| 13 | — | — | — | — | I7 |
+![Diagrama do pipeline com forwarding, mostrando as duas bolhas load-use.](img/a2-com-forwarding.png)
 
-O pipeline ideal leva 11 ciclos. As duas dependências load-use acrescentam uma bolha cada, então o total é `11 + 2 = 13` ciclos.
+O pipeline ideal leva 11 ciclos; as duas bolhas load-use acrescentam 2 ciclos.
 
-**Resposta:** **13 ciclos.** As dependências `lw x5 → add` e `lw x7 → sub` ainda geram uma bolha cada, pois o load só disponibiliza o dado ao fim de MEM; as demais dependências são atendidas pelo forwarding.
+**Resposta:** **13 ciclos** (11 + 2), com uma bolha em cada dependência load-use.
 
 ### A2.4 Reordenação sem bolhas com forwarding
 
 > Reordene as instruções, sem mudar o resultado, para eliminar todas as bolhas com forwarding. Mostre a nova ordem e o novo total de ciclos.
 
-Aproveito as instruções independentes de atualização dos ponteiros para separar cada `lw` de sua instrução consumidora. Mantenho cada atualização de ponteiro depois do load correspondente e a soma antes da subtração e da gravação:
+Aproveito as instruções independentes para separar cada `lw` de seu consumidor. A sequência abaixo mantém os IDs originais: I1, I3, I6, I7, I2, I4, I5.
 
-| Nova ordem | Instrução original | Instrução |
-| ---: | ---: | --- |
-| 1 | 1 | `lw x5, 0(x10)` |
-| 2 | 3 | `lw x7, 0(x11)` |
-| 3 | 6 | `addi x10, x10, 4` |
-| 4 | 7 | `addi x11, x11, 4` |
-| 5 | 2 | `add x6, x6, x5` |
-| 6 | 4 | `sub x6, x6, x7` |
-| 7 | 5 | `sw x6, 0(x12)` |
+| Ordem | Instrução original | Instrução |
+| ---: | --- | --- |
+| 1 | I1 | `lw x5, 0(x10)` |
+| 2 | I3 | `lw x7, 0(x11)` |
+| 3 | I6 | `addi x10, x10, 4` |
+| 4 | I7 | `addi x11, x11, 4` |
+| 5 | I2 | `add x6, x6, x5` |
+| 6 | I4 | `sub x6, x6, x7` |
+| 7 | I5 | `sw x6, 0(x12)` |
 
-Assim, há instruções independentes entre cada load e seu uso. A dependência entre `add` e `sub` é resolvida pelo forwarding; a dependência entre `sub` e `sw` também é resolvida pelo forwarding completo considerado acima. Não há bolhas:
+Os `addi` só alteram ponteiros usados pelos `lw`, que já foram executados antes deles; assim, os endereços lidos não mudam. Além disso, as operações sobre `x6` mantêm a ordem `add → sub → sw`, preservando o resultado. Com forwarding, `add → sub` e `sub → sw` não exigem bolhas.
 
-| Ciclo | IF | ID | EX | MEM | WB |
-| ---: | --- | --- | --- | --- | --- |
-| 1 | R1 | — | — | — | — |
-| 2 | R2 | R1 | — | — | — |
-| 3 | R3 | R2 | R1 | — | — |
-| 4 | R4 | R3 | R2 | R1 | — |
-| 5 | R5 | R4 | R3 | R2 | R1 |
-| 6 | R6 | R5 | R4 | R3 | R2 |
-| 7 | R7 | R6 | R5 | R4 | R3 |
-| 8 | — | R7 | R6 | R5 | R4 |
-| 9 | — | — | R7 | R6 | R5 |
-| 10 | — | — | — | R7 | R6 |
-| 11 | — | — | — | — | R7 |
+![Diagrama do pipeline reordenado, com os identificadores originais das instruções e sem bolhas.](img/a2-reordenado.png)
 
-**Resposta:** a nova ordem preserva o resultado e elimina as bolhas com forwarding. O total é `7 + (5 − 1) =` **11 ciclos**.
+**Resposta:** a reordenação preserva o resultado e elimina as bolhas com forwarding. O total é `7 + (5 − 1) =` **11 ciclos**.
 
 ### Resumo dos ciclos da A2
 
