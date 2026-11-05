@@ -270,7 +270,63 @@ Pela A1, o processamento na V leva 1,482 ms em média a cada período de 10 ms: 
 
 **Resposta:** a thread `sensor` passa a maior parte do tempo **Bloqueada**, esperando o próximo evento de amostragem; o processamento médio ocupa cerca de **14,8%** de cada período de 10 ms.
 
-## A4. Código com semáforos
+## A4. Código com semáforos: buffer entre o sensor e o motor
+
+### A4.1 Execuções e resultados
+
+> Execute cada versão três vezes com 20.000 amostras e o seu buffer de N posições. Registre consumidas, perdidas, duplicadas e travamento.
+
+Usei `N = 3 + (2 mod 5) = 5`. Cada comando padrão executa três rodadas de 20.000 amostras. Em cada rodada, **perdidas** é o número de IDs gerados que não foram consumidos; **duplicadas** conta consumos adicionais de IDs repetidos. Na v3, também apresento quantas foram geradas para deixar claro que o deadlock interrompeu a produção antes das 20.000.
+
+| Versão | Execução | Geradas | Consumidas | Perdidas | Duplicadas | Travou? |
+| --- | ---: | ---: | ---: | ---: | ---: | :---: |
+| 1 — sem sincronização | 1 | 20.000 | 19.908 | 92 | 0 | Não |
+| 1 — sem sincronização | 2 | 20.000 | 19.923 | 77 | 0 | Não |
+| 1 — sem sincronização | 3 | 20.000 | 19.856 | 144 | 0 | Não |
+| 2 — semáforos | 1 | 20.000 | 20.000 | 0 | 0 | Não |
+| 2 — semáforos | 2 | 20.000 | 20.000 | 0 | 0 | Não |
+| 2 — semáforos | 3 | 20.000 | 20.000 | 0 | 0 | Não |
+| 3 — ordem trocada | 1 | 5 | 1 | 4 | 0 | Sim |
+| 3 — ordem trocada | 2 | 5 | 1 | 4 | 0 | Sim |
+| 3 — ordem trocada | 3 | 5 | 1 | 4 | 0 | Sim |
+
+Na v1, os 20.000 IDs foram gerados em cada rodada, mas o contador compartilhado perdeu atualizações e 77–144 amostras não chegaram ao consumidor. Na v2, os três semáforos preservaram todas as amostras nas três rodadas. Na v3, cada tentativa travou quando o buffer de cinco posições encheu; por isso só cinco amostras foram geradas, quatro ficaram sem consumo, e as outras 19.995 nem chegaram a ser produzidas.
+
+**Evidências das saídas capturadas:**
+
+![Saída capturada das três execuções da versão 1, sem sincronização.](img/a4-versao1.png)
+
+![Saída capturada das três execuções da versão 2, com os três semáforos.](img/a4-versao2.png)
+
+![Saída capturada das três execuções da versão 3, com deadlock reproduzido.](img/a4-versao3.png)
+
+### A4.2 Região crítica e corrida na versão 1
+
+> Qual é a região crítica da versão 1, e por que ela perde ou duplica amostras?
+
+A região crítica é a atualização coordenada do contador `ocupadas`, dos índices e das posições do buffer circular. O par “ler `ocupadas` → calcular novo valor → gravar o contador” não é atômico e não está protegido por mutex. O produtor e o consumidor podem ler o mesmo valor antigo; então um grava `valor + 1` e o outro `valor − 1`, apagando a atualização do primeiro. O contador deixa de corresponder às posições de fato ocupadas, o produtor pode sobrescrever uma amostra ainda não lida ou o consumidor pode encontrar uma posição vazia. `time.sleep(0)` entre leitura e escrita oferece uma oportunidade de troca de thread; a espera ocupada continua consultando o contador sem bloquear em semáforo. Nas três execuções observadas houve perda, mas nenhuma duplicata.
+
+**Resposta:** a região crítica é o estado compartilhado do buffer e do contador; sem exclusão mútua, atualizações concorrentes podem corromper a contagem e causar perda ou repetição de amostras.
+
+### A4.3 Garantia de cada semáforo na versão 2
+
+> O que cada um dos três semáforos garante na versão 2?
+
+- `vazio`, inicializado em `N = 5`: conta espaços livres. O produtor faz `wait(vazio)` antes de inserir, então não escreve sobre posições que ainda estão ocupadas.
+- `cheio`, inicializado em `0`: conta amostras disponíveis. O consumidor faz `wait(cheio)` antes de retirar, então não lê uma posição sem item.
+- `mutex`, inicializado em `1`: permite que apenas uma thread por vez altere o buffer e os índices durante a operação.
+
+O produtor usa a ordem `wait(vazio) → wait(mutex) → inserir → post(mutex) → post(cheio)`. O consumidor usa `wait(cheio) → wait(mutex) → retirar → post(mutex) → post(vazio)`. As esperas por espaço ou item acontecem antes de adquirir o mutex.
+
+**Resposta:** `vazio` protege a capacidade, `cheio` protege a disponibilidade de itens e `mutex` protege a seção crítica do buffer e dos índices.
+
+### A4.4 Efeito da ordem trocada na versão 3
+
+> O que aconteceu na versão 3, e por quê?
+
+A v3 inverteu a ordem do produtor para `wait(mutex) → wait(vazio)`. Para reproduzir o caso, a barreira de demonstração só libera o consumidor depois que o buffer fica cheio e o produtor já detém `mutex`. O produtor passa a esperar uma posição `vazio`; o consumidor obtém um sinal `cheio`, mas espera pelo `mutex` que o produtor mantém. Só o consumidor poderia retirar um item e sinalizar `vazio`, e ele não consegue entrar na seção protegida. Forma-se a espera circular; após 1 s sem concluir a operação, o código encerra a tentativa e registra o travamento. A barreira torna o escalonamento do exemplo reproduzível; ela não muda a ordem de semáforos que causa o problema.
+
+**Resposta:** a v3 trava porque o produtor segura `mutex` enquanto espera `vazio`, impedindo o consumidor de retirar um item e liberar o espaço de que o produtor precisa.
 
 ## A5. Deadlock
 
