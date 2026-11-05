@@ -214,28 +214,41 @@ Os `addi` só alteram ponteiros usados pelos `lw`, que já foram executados ante
 
 > Proponha quais tarefas serão threads de um mesmo processo e quais serão processos separados. Justifique considerando compartilhamento de memória, custo de criação e troca de contexto e isolamento de falhas.
 
-Manteria as tarefas do caminho de segurança no processo `controle_tato` e executaria a comunicação BLE em um processo separado. As threads seriam persistentes: cada uma executa um loop, sem criar uma nova thread a cada amostra.
+Manteria leitura do sensor, processamento e vibração como threads persistentes do processo `controle_tato`, formando o **caminho crítico de tempo real**. O BLE roda em um processo separado. Nenhuma thread é criada por amostra.
 
 | Tarefa | Organização proposta | Motivo principal |
 | --- | --- | --- |
-| Ler o sensor | Thread `sensor` em `controle_tato` | Publica a amostra no buffer compartilhado assim que ela chega. |
-| Processar a amostra | Thread `processamento` em `controle_tato` | Lê a amostra e calcula a resposta sem serializar dados entre processos. |
-| Acionar o motor | Thread `vibracao` em `controle_tato` | Recebe o padrão calculado e aciona o motor sem depender da conexão BLE. |
-| Comunicar com o celular por BLE | Processo `ble` separado | Trata comandos e logs vindos de fora, isolando falhas do módulo e limitando seu acesso à memória de controle. |
+| Ler o sensor | Thread `sensor` em `controle_tato` | Lê cada amostra e a publica rapidamente no buffer do processo de controle. |
+| Processar a amostra | Thread `processamento` em `controle_tato` | Calcula a resposta usando os dados compartilhados, sem serialização entre processos. |
+| Acionar o motor | Thread `vibracao` em `controle_tato` | Aplica a resposta sem depender da conexão BLE. |
+| Comunicar com o celular por BLE | Processo `ble`, com threads próprias de log e configuração | Mantém o tratamento dos dados externos fora do espaço de memória do controle. |
 
-**Compartilhamento de memória:** sensor, processamento e vibração trocam amostras e comandos por estruturas do mesmo processo, como um buffer circular protegido por sincronização. O processo BLE troca apenas mensagens validadas por uma interface IPC; ele não acessa diretamente as amostras nem o buffer.
+**Compartilhamento de memória:** as três threads de controle compartilham o buffer de amostras e os dados de vibração no mesmo processo, com sincronização curta. O BLE usa um socket Unix (`AF_UNIX`) com mensagens limitadas: o kernel copia os dados entre processos e cada lado valida tamanho, tipo e faixa dos campos. Não há região de memória compartilhada entre BLE e controle.
 
-**Custo de criação e troca de contexto:** threads compartilham o espaço de endereçamento e são mais leves que processos, o que reduz o custo no caminho executado a cada amostra. As threads e o processo BLE são criados uma vez na inicialização; o BLE não participa do ciclo de 10 ms da amostra. A comunicação IPC tem custo, mas fica fora do caminho de vibração.
+**Custo de criação e troca de contexto:** threads persistentes são mais leves que processos e evitam criar uma thread por amostra. Pela A1, a V leva 1,482 ms por amostra em média e chega a 4,482 ms no pior caso, incluindo até 3 ms de atraso do Linux: sobram só 0,518 ms do limite de 5 ms. Por isso, transferências entre as três threads e suas trocas de contexto precisam ser curtas; logs e comandos BLE ficam fora desse caminho. Usaria prioridade de tempo real, como `SCHED_FIFO`, com rotinas curtas e limitadas para não monopolizar a CPU.
 
-**Isolamento de falhas:** as três threads de controle compartilham memória, então uma falha nelas ainda pode afetar todo o processo `controle_tato`. O processo BLE separado limita o impacto de um erro nesse módulo: ele pode ser encerrado e reiniciado sem encerrar as tarefas de sensor, processamento e vibração.
+**BLE sem bloquear o controle:** o processo de controle envia logs ao socket de forma não bloqueante. A fila de saída é limitada; se estiver cheia ou o BLE estiver lento, descarta-se o log e contabiliza-se a perda, sem esperar pelo celular. Comandos recebidos entram como mensagens validadas e são aplicados pelo controle em um ponto seguro do ciclo.
+
+**Isolamento de falhas e recuperação:** as três threads de controle compartilham memória, então uma falha nelas ainda pode parar o processo inteiro. O BLE separado pode ser encerrado e reiniciado sem encerrar diretamente a vibração. Um supervisor externo monitora o processo `controle_tato` e o reinicia se ele cair; durante a reinicialização, a pulseira sinaliza a interrupção com um pulso longo, como no watchdog do Dilema 1.
+
+**Compatibilidade com a A5:** `thread_sensor` fica em `controle_tato`; `thread_log` e `thread_config` ficam no processo `ble`. `thread_config` não acessa diretamente o barramento I2C: pede o ajuste ao processo de controle pelo socket Unix. Para representar o deadlock da A5, os semáforos nomeados `i2c`, `log` e `ble` são compartilhados pelo kernel entre os processos: `thread_sensor` pode deter `i2c` e esperar `log`; `thread_log`, no processo BLE, pode deter `log` e esperar `ble`; e `thread_config`, também no BLE, pode deter `ble` e esperar o semáforo `i2c` antes de pedir o ajuste ao controle. Isso modela a implementação defeituosa sem compartilhar a região de dados. Na implementação recomendada, o controle não espera por IPC enquanto mantém outro recurso bloqueado.
+
+**Resposta:** leitura do sensor, processamento e vibração são threads persistentes de `controle_tato`; BLE é processo separado e troca mensagens copiadas e validadas por socket Unix não bloqueante.
 
 ### A3.2 Falha explorada no módulo BLE
 
 > Se alguém explorar uma falha no módulo BLE, que diferença faz ele ser uma thread ou um processo separado?
 
-Se o BLE fosse uma thread de `controle_tato`, o código explorado poderia ler ou corromper dados compartilhados, alterar configurações e derrubar o processo que também controla a vibração. Como processo separado, fica restrito ao próprio espaço de memória e às permissões concedidas; o processo de controle aceita somente mensagens IPC definidas e valida os comandos antes de aplicá-los. Assim, uma falha no BLE pode interromper a conexão ou o recebimento de comandos, mas tende a não parar diretamente a vibração. O isolamento reduz o impacto, mas não elimina riscos como comandos abusivos, erros na validação/IPC ou falhas no sistema operacional.
+| Aspecto | BLE como thread de `controle_tato` | BLE como processo separado |
+| --- | --- | --- |
+| Memória alcançável | Pode acessar amostras, buffer e configurações do processo de controle. | Fica no espaço de memória próprio; recebe só mensagens pelo socket Unix. |
+| Efeito de travamento | Pode derrubar o processo inteiro, inclusive a vibração. | A conexão BLE pode parar, mas o controle tende a continuar. |
+| Contenção | Usa as permissões do processo de controle. | Pode rodar com usuário sem privilégios e permissões/filtro de chamadas reduzidos. |
+| Custo | Não acrescenta IPC entre BLE e controle. | Acrescenta cópia, IPC e validação das mensagens. |
 
-**Resposta:** o BLE deve rodar em processo separado para limitar o acesso e conter falhas; a latência adicional da IPC é aceitável porque logs e configurações não devem bloquear o processamento e a vibração da amostra.
+O BLE separado reduz o impacto de uma exploração, mas não elimina falhas no sistema operacional, mensagens abusivas ou erros na validação. A latência adicional é aceitável porque logs e configurações não estão no caminho de vibração da amostra; o envio de log é não bloqueante.
+
+**Resposta:** como processo separado, uma falha no BLE fica mais contida e não ganha acesso direto à memória crítica; paga-se o custo de IPC fora do caminho de tempo real.
 
 ### A3.3 Estados de um processo e estado da thread do sensor
 
@@ -247,13 +260,15 @@ stateDiagram-v2
     Novo --> Pronto : criado
     Pronto --> Executando : escalonado pela CPU
     Executando --> Pronto : preempção / fim do quantum
-    Executando --> Bloqueado : espera por sensor ou temporizador
+    Executando --> Bloqueado : espera por sensor, temporizador ou semáforo
     Bloqueado --> Pronto : evento / amostra disponível
     Executando --> Encerrado : término
     Encerrado --> [*]
 ```
 
-A thread `sensor` passa a maior parte do tempo **bloqueada/esperando**, aguardando a próxima amostra do sensor ou o temporizador de 10 ms. Quando o evento chega, ela passa a pronta; o escalonador a coloca em execução para ler e publicar a amostra.
+Pela A1, o processamento na V leva 1,482 ms em média a cada período de 10 ms: `1,482 ÷ 10 × 100 ≈ 14,8%` do período. A leitura e publicação do sensor usam menos CPU que o processamento completo. A thread `sensor` passa a maior parte do tempo **Bloqueada**, aguardando a próxima amostra ou o temporizador; então percorre `Bloqueado → Pronto → Executando → Bloqueado`. O tempo em Pronto é quando aguarda a CPU; a A1 considera que o atraso do Linux pode chegar a 3 ms.
+
+**Resposta:** a thread `sensor` passa a maior parte do tempo **Bloqueada**, esperando o próximo evento de amostragem; o processamento médio ocupa cerca de **14,8%** de cada período de 10 ms.
 
 ## A4. Código com semáforos
 
