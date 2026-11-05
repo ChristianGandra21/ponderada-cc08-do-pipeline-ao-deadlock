@@ -132,15 +132,6 @@ Conta: T_novo ≈ 2,275 ms
 
 **Von Neumann ou Harvard?** A L1 é dividida (L1d e L1i); o `lscpu` também reporta L2 em quatro instâncias e L3 em uma instância. A memória principal é compartilhada por instruções e dados. Portanto, o computador tem organização **Harvard modificada**: Harvard na L1 e memória unificada na RAM.
 
-### Resumo dos resultados da A1
-
-| Cenário | Tempo por amostra | Folga até 5 ms | Atende? |
-| --- | ---: | ---: | :---: |
-| H | 4,375 ms | 0,625 ms (12,5%) | Sim |
-| H + DSP | 2,275 ms | 2,725 ms (54,5%) | Sim |
-| V, média | 1,482 ms | 3,518 ms (70,4%) | Sim |
-| V, pior caso com atraso do SO | 4,482 ms | 0,518 ms (10,4%) | Sim |
-
 ## A2. Pipeline: o loop do filtro
 
 ### Premissas e legenda da A2
@@ -217,15 +208,52 @@ Os `addi` só alteram ponteiros usados pelos `lw`, que já foram executados ante
 
 **Resposta:** a reordenação preserva o resultado e elimina as bolhas com forwarding. O total é `7 + (5 − 1) =` **11 ciclos**.
 
-### Resumo dos ciclos da A2
+## A3. Processos e threads: como organizar o software
 
-| Cenário | Bolhas | Total |
-| --- | ---: | ---: |
-| Sem forwarding | 6 | 17 ciclos |
-| Com forwarding | 2 | 13 ciclos |
-| Reordenado com forwarding | 0 | 11 ciclos |
+### A3.1 Organização das quatro tarefas
 
-## A3. Processos e threads
+> Proponha quais tarefas serão threads de um mesmo processo e quais serão processos separados. Justifique considerando compartilhamento de memória, custo de criação e troca de contexto e isolamento de falhas.
+
+Manteria as tarefas do caminho de segurança no processo `controle_tato` e executaria a comunicação BLE em um processo separado. As threads seriam persistentes: cada uma executa um loop, sem criar uma nova thread a cada amostra.
+
+| Tarefa | Organização proposta | Motivo principal |
+| --- | --- | --- |
+| Ler o sensor | Thread `sensor` em `controle_tato` | Publica a amostra no buffer compartilhado assim que ela chega. |
+| Processar a amostra | Thread `processamento` em `controle_tato` | Lê a amostra e calcula a resposta sem serializar dados entre processos. |
+| Acionar o motor | Thread `vibracao` em `controle_tato` | Recebe o padrão calculado e aciona o motor sem depender da conexão BLE. |
+| Comunicar com o celular por BLE | Processo `ble` separado | Trata comandos e logs vindos de fora, isolando falhas do módulo e limitando seu acesso à memória de controle. |
+
+**Compartilhamento de memória:** sensor, processamento e vibração trocam amostras e comandos por estruturas do mesmo processo, como um buffer circular protegido por sincronização. O processo BLE troca apenas mensagens validadas por uma interface IPC; ele não acessa diretamente as amostras nem o buffer.
+
+**Custo de criação e troca de contexto:** threads compartilham o espaço de endereçamento e são mais leves que processos, o que reduz o custo no caminho executado a cada amostra. As threads e o processo BLE são criados uma vez na inicialização; o BLE não participa do ciclo de 10 ms da amostra. A comunicação IPC tem custo, mas fica fora do caminho de vibração.
+
+**Isolamento de falhas:** as três threads de controle compartilham memória, então uma falha nelas ainda pode afetar todo o processo `controle_tato`. O processo BLE separado limita o impacto de um erro nesse módulo: ele pode ser encerrado e reiniciado sem encerrar as tarefas de sensor, processamento e vibração.
+
+### A3.2 Falha explorada no módulo BLE
+
+> Se alguém explorar uma falha no módulo BLE, que diferença faz ele ser uma thread ou um processo separado?
+
+Se o BLE fosse uma thread de `controle_tato`, o código explorado poderia ler ou corromper dados compartilhados, alterar configurações e derrubar o processo que também controla a vibração. Como processo separado, fica restrito ao próprio espaço de memória e às permissões concedidas; o processo de controle aceita somente mensagens IPC definidas e valida os comandos antes de aplicá-los. Assim, uma falha no BLE pode interromper a conexão ou o recebimento de comandos, mas tende a não parar diretamente a vibração. O isolamento reduz o impacto, mas não elimina riscos como comandos abusivos, erros na validação/IPC ou falhas no sistema operacional.
+
+**Resposta:** o BLE deve rodar em processo separado para limitar o acesso e conter falhas; a latência adicional da IPC é aceitável porque logs e configurações não devem bloquear o processamento e a vibração da amostra.
+
+### A3.3 Estados de um processo e estado da thread do sensor
+
+> Desenhe o diagrama de estados de um processo. Em qual estado a thread do sensor passa a maior parte do tempo? Por quê?
+
+```mermaid
+stateDiagram-v2
+    [*] --> Novo
+    Novo --> Pronto : criado
+    Pronto --> Executando : escalonado pela CPU
+    Executando --> Pronto : preempção / fim do quantum
+    Executando --> Bloqueado : espera por sensor ou temporizador
+    Bloqueado --> Pronto : evento / amostra disponível
+    Executando --> Encerrado : término
+    Encerrado --> [*]
+```
+
+A thread `sensor` passa a maior parte do tempo **bloqueada/esperando**, aguardando a próxima amostra do sensor ou o temporizador de 10 ms. Quando o evento chega, ela passa a pronta; o escalonador a coloca em execução para ler e publicar a amostra.
 
 ## A4. Código com semáforos
 
