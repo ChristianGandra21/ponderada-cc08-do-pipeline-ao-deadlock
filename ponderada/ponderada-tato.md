@@ -330,4 +330,58 @@ A v3 inverteu a ordem do produtor para `wait(mutex) → wait(vazio)`. Para repro
 
 ## A5. Deadlock
 
+### A5.1 Sequência de execução e grafo de alocação
+
+> Descreva uma sequência de execução que leva ao deadlock e desenhe o grafo de alocação de recursos nesse instante.
+
+`P(recurso)` tenta adquirir o semáforo que protege o recurso; se outra thread já o detém, a chamada espera. `V(recurso)` libera o semáforo. Considere esta intercalação:
+
+1. `thread_sensor` executa `P(i2c)` e adquire o barramento I2C. Ela lê o sensor e depois tenta `P(log)`.
+2. `thread_log` executa `P(log)` antes do sensor chegar a esse semáforo e adquire o arquivo de log. Ela lê o log e depois tenta `P(ble)`.
+3. `thread_config` executa `P(ble)` antes de a thread de log chegar a esse semáforo e adquire o rádio BLE. Ela recebe o comando e depois tenta `P(i2c)`.
+4. A thread do sensor não consegue `log`, pois ele está com `thread_log`; a thread de log não consegue `ble`, pois ele está com `thread_config`; e a thread de configuração não consegue `i2c`, pois ele está com `thread_sensor`.
+
+As três ficam bloqueadas antes de executar as operações seguintes e os respectivos `V(...)`. O grafo abaixo usa seta **recurso → thread** para indicar que o recurso está alocado e seta **thread → recurso** para indicar que a thread o está solicitando:
+
+```mermaid
+flowchart LR
+    I2C[i2c] -->|alocado| S[thread_sensor]
+    S -->|solicita| LOG[log]
+    LOG -->|alocado| L[thread_log]
+    L -->|solicita| BLE[ble]
+    BLE -->|alocado| C[thread_config]
+    C -->|solicita| I2C
+```
+
+O ciclo `i2c → thread_sensor → log → thread_log → ble → thread_config → i2c` mostra que cada thread aguarda um recurso retido por outra.
+
+**Resposta:** o deadlock ocorre quando sensor segura `i2c` e espera `log`, log segura `log` e espera `ble`, e configuração segura `ble` e espera `i2c`.
+
+### A5.2 Quatro condições necessárias para o deadlock
+
+> Mostre como cada uma das quatro condições necessárias para o deadlock aparece nesse código.
+
+| Condição | Como aparece neste cenário |
+| --- | --- |
+| Exclusão mútua | Cada semáforo binário (`i2c`, `log` e `ble`) permite que uma thread por vez detenha o recurso protegido. As outras precisam esperar. |
+| Posse e espera | Cada thread mantém seu primeiro recurso enquanto tenta obter o segundo: sensor mantém `i2c` e espera `log`; log mantém `log` e espera `ble`; configuração mantém `ble` e espera `i2c`. |
+| Não preempção | O sistema não retira à força da thread o recurso protegido. Ele permanece retido até a própria thread executar `V(...)`; como ela está esperando, ainda não chega à liberação. |
+| Espera circular | Forma-se o ciclo sensor → `log` → thread_log → `ble` → thread_config → `i2c` → sensor. Cada participante espera o próximo liberar algo. |
+
+**Resposta:** as quatro condições estão presentes ao mesmo tempo; em particular, não preempção explica por que o sistema não toma os recursos das threads bloqueadas, enquanto espera circular descreve o ciclo entre elas.
+
+### A5.3 Correções e efeito para quem usa a pulseira
+
+> Proponha duas correções de tipos diferentes. Para cada uma, diga o que muda para quem está usando a pulseira.
+
+**Correção 1 — prevenção por ordem de aquisição e liberação antes de esperar (recomendada).** Defina uma ordem única para aquisições simultâneas, por exemplo `i2c → log → ble`, e não permita que uma thread adquira um recurso anterior da ordem enquanto mantém um posterior. Para respeitar essa regra, `thread_config` deve receber o comando sob `ble`, liberar `ble` e só então solicitar o ajuste do sensor ao processo de controle por socket Unix; o processo de controle adquire `i2c` para realizar o ajuste. A configuração não mantém `ble` enquanto espera por `i2c`, então o ciclo é quebrado. Na arquitetura da A3, o processo BLE não acessa diretamente o I2C nem espera por IPC enquanto mantém outro recurso.
+
+**Efeito para a pessoa:** a correção impede esse congelamento por espera circular. Um comando de configuração pode ser processado um pouco depois, e logs podem ser atrasados ou descartados se a fila estiver cheia, mas a leitura e a vibração não ficam esperando pelo BLE.
+
+**Correção 2 — detecção e recuperação com watchdog.** Monitore o progresso das threads e o tempo que cada operação permanece bloqueada. Se o controle deixar de progredir além do limite, o supervisor sinaliza a falha, encerra os processos `controle_tato` e `ble` que participam do ciclo e só então remove e recria os semáforos compartilhados com valores conhecidos (`i2c=1`, `log=1`, `ble=1`); em seguida, reinicia os serviços e descarta mensagens antigas. O supervisor deve garantir que as threads antigas pararam antes de recriar os semáforos. Não basta liberar semáforos arbitrariamente: isso poderia permitir que duas threads usem o mesmo recurso ao mesmo tempo.
+
+**Efeito para a pessoa:** essa solução não impede a primeira ocorrência do travamento. Durante a recuperação, a vibração fica indisponível; no cenário do Dilema 1, a interrupção dura cerca de **4 segundos** e é avisada por um pulso longo. Depois, o serviço volta a funcionar. Portanto, o watchdog reduz a duração do congelamento, mas não substitui a prevenção.
+
+**Resposta:** a prevenção remove a espera circular por uma disciplina de aquisição; o watchdog detecta uma falha que escapou e reinicia o controle, com uma interrupção temporária da vibração.
+
 # Parte B — A decisão do CTO
