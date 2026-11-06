@@ -385,3 +385,15 @@ O ciclo `i2c → thread_sensor → log → thread_log → ble → thread_config 
 **Resposta:** a prevenção remove a espera circular por uma disciplina de aquisição; o watchdog detecta uma falha que escapou e reinicia o controle, com uma interrupção temporária da vibração.
 
 # Parte B — A decisão do CTO
+
+## Memorando ao conselho da Tato
+
+**Recomendo adiar o lançamento por dois meses para corrigir e testar o deadlock antes de colocar as pulseiras em campo.** Aceito perder o edital das primeiras 2.000 unidades e esperar pelo próximo financiamento semelhante, previsto para cerca de seis meses. Esse custo recai sobre a empresa e também atrasa o acesso das pessoas ao produto.
+
+Para dimensionar o custo financeiro, uso **hipóteses ilustrativas**, pois o enunciado não informa custo nem valor do edital: custo médio de R$ 500 por pulseira e financiamento de R$ 750 por unidade. Nesse cenário, produzir o lote custaria R$ 1 milhão, e o edital cobriria R$ 1,5 milhão — uma diferença bruta de R$ 500 mil, antes de suporte, monitoramento e correções. Adiar também significa abrir mão do aprendizado imediato em campo. Em contrapartida, permite investigar o problema e testar a correção em condições controladas.
+
+Na A4, a versão 3 travou após produzir 5 amostras: apenas 1 foi consumida e 4 foram perdidas. Esse experimento não estima a frequência do problema em campo, mas mostra como um deadlock pode interromper o fluxo. No dilema, a estimativa é de um travamento a cada 10.000 horas de uso. Como cenário ilustrativo, 2.000 pulseiras usadas uma hora por dia durante 21 dias somariam 42.000 horas, com cerca de **98,5% de probabilidade de ao menos uma ocorrência**, supondo uma taxa constante e aleatória.
+
+O watchdog reiniciaria a pulseira e avisaria a pessoa, mas deixaria cerca de quatro segundos sem vibração — aproximadamente 400 intervalos de amostragem de 10 ms. Como a vibração informa sobre obstáculos, considero essa interrupção um risco que não devo transferir aos usuários enquanto a falha for conhecida. Adiar também evita expor as 2.000 unidades ao risco de exploração do BLE antes de concluir sua validação; isso não prova que o módulo esteja seguro, então os testes de comandos malformados e de isolamento do processo BLE também serão condição para o lançamento.
+
+Eu reconsideraria lançar antes dos dois meses se testes demonstrassem que um mecanismo independente mantém um aviso útil durante o deadlock e restaura a vibração em até **5 ms**. Até que essa condição seja comprovada, recomendo adiar.
