@@ -304,7 +304,17 @@ Na v1, o `sleep(0)` em cada operação válida expôs a corrida: além das amost
 
 ![Print real do terminal com a execução das versões 1, 2 e 3 da A4.](./img/a4-terminal-completo.png)
 
-Também deixei os recortes individuais em [versão 1](./img/a4-versao1.png), [versão 2](./img/a4-versao2.png) e [versão 3](./img/a4-versao3.png).
+**Print individual — versão 1:**
+
+![Captura do terminal com a execução da versão 1 da A4.](./img/a4-versao1.png)
+
+**Print individual — versão 2:**
+
+![Captura do terminal com a execução da versão 2 da A4.](./img/a4-versao2.png)
+
+**Print individual — versão 3:**
+
+![Captura do terminal com a execução da versão 3 da A4.](./img/a4-versao3.png)
 
 ### A4.2 Região crítica e corrida na versão 1
 
