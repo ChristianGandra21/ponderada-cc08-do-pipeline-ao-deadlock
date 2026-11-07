@@ -87,9 +87,10 @@ def executar(amostras, capacidade):
                     ultima_amostra = time.monotonic()
                 continue
 
-            if produtor_finalizado.is_set() and len(geradas) == amostras:
-                if ocupadas[0] <= 0:
-                    break
+            if (produtor_finalizado.is_set()
+                    and len(consumidas) >= amostras
+                    and consumidas == list(range(amostras))):
+                break
             if time.monotonic() - ultima_amostra >= TIMEOUT_CONSUMIDOR_S:
                 travou.set()
                 parar.set()

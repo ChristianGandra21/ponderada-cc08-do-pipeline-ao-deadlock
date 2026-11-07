@@ -1,5 +1,5 @@
 A4 — Versão 3: produtor adquire mutex antes de vazio
 N=5; amostras por execução=20000; execuções=3; timeout=1 s; atraso simulado do motor=0.1 ms
-Execução 1: geradas=5; consumidas=1; perdidas=0; retidas=4; não_geradas=19995; duplicadas=0; leituras_vazias=0; FIFO=NÃO; travou=SIM
-Execução 2: geradas=5; consumidas=1; perdidas=0; retidas=4; não_geradas=19995; duplicadas=0; leituras_vazias=0; FIFO=NÃO; travou=SIM
-Execução 3: geradas=5; consumidas=1; perdidas=0; retidas=4; não_geradas=19995; duplicadas=0; leituras_vazias=0; FIFO=NÃO; travou=SIM
+Execução 1: geradas=5; consumidas=0; perdidas=0; retidas=5; não_geradas=19995; duplicadas=0; leituras_vazias=0; FIFO=NÃO; travou=SIM
+Execução 2: geradas=5; consumidas=0; perdidas=0; retidas=5; não_geradas=19995; duplicadas=0; leituras_vazias=0; FIFO=NÃO; travou=SIM
+Execução 3: geradas=5; consumidas=0; perdidas=0; retidas=5; não_geradas=19995; duplicadas=0; leituras_vazias=0; FIFO=NÃO; travou=SIM

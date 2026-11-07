@@ -272,9 +272,9 @@ stateDiagram-v2
     Encerrado --> [*]
 ```
 
-Pela A1, o processamento na V leva 1,482 ms em média a cada período de 10 ms: `1,482 ÷ 10 × 100 ≈ 14,8%` do período. A leitura e publicação do sensor usam menos CPU que o processamento completo. A thread `sensor` passa a maior parte do tempo **Bloqueada**, aguardando a próxima amostra ou o temporizador; então percorre `Bloqueado → Pronto → Executando → Bloqueado`. O tempo em Pronto é quando aguarda a CPU; a A1 considera que o atraso do Linux pode chegar a 3 ms.
+O sensor produz uma amostra a cada 10 ms. Entre as leituras, a thread `sensor` aguarda o temporizador ou o evento do dispositivo, sem ocupar a CPU em espera ativa. Por isso, passa a maior parte do tempo **Bloqueada** e percorre `Bloqueado → Pronto → Executando → Bloqueado` a cada nova leitura. O tempo em Pronto é a espera pela CPU. Os 1,482 ms da A1 estimam o processamento completo da amostra na Plataforma V; não medem o tempo de CPU dessa thread isoladamente.
 
-**Resposta:** a thread `sensor` passa a maior parte do tempo **Bloqueada**, esperando o próximo evento de amostragem; o processamento médio ocupa cerca de **14,8%** de cada período de 10 ms.
+**Resposta:** a thread `sensor` passa a maior parte do tempo **Bloqueada**, esperando o próximo evento de amostragem.
 
 ## A4. Código com semáforos: buffer entre o sensor e o motor
 
@@ -288,39 +288,39 @@ Usei `N = 3 + (2 mod 5) = 5`. Rodei as versões em Python 3.12.3, Ubuntu 24.04, 
 
 | Versão | Execução | Geradas | Consumidas | Perdidas | Retidas | Não geradas | Duplicadas | Leituras vazias | FIFO íntegra? | Travou? |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
-| 1 — sem sincronização | 1 | 20.000 | 17.697 | 2.302 | 1 | 0 | 0 | 2.216 | Não | Não |
-| 1 — sem sincronização | 2 | 20.000 | 17.656 | 2.341 | 3 | 0 | 0 | 2.680 | Não | Não |
-| 1 — sem sincronização | 3 | 20.000 | 17.910 | 2.089 | 1 | 0 | 0 | 2.351 | Não | Não |
+| 1 — sem sincronização | 1 | 20.000 | 17.676 | 2.322 | 2 | 0 | 0 | 2.297 | Não | Sim |
+| 1 — sem sincronização | 2 | 20.000 | 17.658 | 2.341 | 1 | 0 | 0 | 2.516 | Não | Sim |
+| 1 — sem sincronização | 3 | 20.000 | 17.567 | 2.433 | 0 | 0 | 0 | 2.498 | Não | Sim |
 | 2 — semáforos | 1 | 20.000 | 20.000 | 0 | 0 | 0 | 0 | 0 | Sim | Não |
 | 2 — semáforos | 2 | 20.000 | 20.000 | 0 | 0 | 0 | 0 | 0 | Sim | Não |
 | 2 — semáforos | 3 | 20.000 | 20.000 | 0 | 0 | 0 | 0 | 0 | Sim | Não |
-| 3 — ordem trocada | 1 | 5 | 1 | 0 | 4 | 19.995 | 0 | 0 | Não | Sim |
-| 3 — ordem trocada | 2 | 5 | 1 | 0 | 4 | 19.995 | 0 | 0 | Não | Sim |
-| 3 — ordem trocada | 3 | 5 | 1 | 0 | 4 | 19.995 | 0 | 0 | Não | Sim |
+| 3 — ordem trocada | 1 | 5 | 0 | 0 | 5 | 19.995 | 0 | 0 | Não | Sim |
+| 3 — ordem trocada | 2 | 5 | 0 | 0 | 5 | 19.995 | 0 | 0 | Não | Sim |
+| 3 — ordem trocada | 3 | 5 | 0 | 0 | 5 | 19.995 | 0 | 0 | Não | Sim |
 
-Na v1, o `sleep(0)` em cada operação válida expôs a corrida: além das amostras perdidas, o consumidor fez milhares de leituras vazias. Nesta rodada, houve 2.089–2.341 perdas e 2.216–2.680 leituras vazias; os números variam entre execuções. Na v2, as três execuções consumiram todos os IDs na ordem exata, sem perda, retenção, duplicata ou leitura vazia. Na v3, o deadlock foi detectado em todas as rodadas; no encerramento destas execuções, 1 amostra foi consumida e 4 ficaram retidas no buffer. As outras 19.995 não foram geradas. As quatro retidas **não são amostras perdidas**. Uma corrida entre os timeouts pode fazer outra execução terminar com 0 consumidas e 5 retidas.
+Na v1, o `sleep(0)` em cada operação válida expôs a corrida: além das amostras perdidas, o consumidor fez milhares de leituras vazias. Nesta rodada, houve 2.322–2.433 perdas e 2.297–2.516 leituras vazias. Como a sequência completa não chegou e nenhuma nova amostra foi recebida por 1 s, as três rodadas registraram travamento por timeout. Na v2, as três execuções consumiram todos os IDs na ordem exata, sem perda, retenção, duplicata ou leitura vazia. Na v3, o deadlock foi detectado em todas as rodadas; no encerramento, nenhuma amostra havia sido consumida, cinco ficaram retidas no buffer e 19.995 não foram geradas. As cinco retidas **não são amostras perdidas**. Os números podem variar com o escalonamento.
 
-**Print do terminal:** a captura conjunta abaixo mostra os comandos executados e as saídas das versões 1, 2 e 3, com três execuções de cada. Os números podem diferir da tabela porque variam entre execuções; as saídas das rodadas originalmente registradas estão em `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt`.
+**Print das execuções:** a imagem conjunta abaixo reproduz a saída registrada dos três comandos, com três execuções de cada. Os números são os mesmos da tabela e dos arquivos `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt`.
 
-![Print real do terminal com a execução das versões 1, 2 e 3 da A4.](./img/a4-terminal-completo.png)
+![Saída registrada das execuções das versões 1, 2 e 3 da A4.](./img/a4-terminal-completo.png)
 
 **Print individual — versão 1:**
 
-![Captura do terminal com a execução da versão 1 da A4.](./img/a4-versao1.png)
+![Saída registrada da execução da versão 1 da A4.](./img/a4-versao1.png)
 
 **Print individual — versão 2:**
 
-![Captura do terminal com a execução da versão 2 da A4.](./img/a4-versao2.png)
+![Saída registrada da execução da versão 2 da A4.](./img/a4-versao2.png)
 
 **Print individual — versão 3:**
 
-![Captura do terminal com a execução da versão 3 da A4.](./img/a4-versao3.png)
+![Saída registrada da execução da versão 3 da A4.](./img/a4-versao3.png)
 
 ### A4.2 Região crítica e corrida na versão 1
 
 > Qual é a região crítica da versão 1, e por que ela perde ou duplica amostras?
 
-A região crítica é a atualização coordenada do contador `ocupadas`, dos índices e das posições do buffer circular. O par “ler `ocupadas` → calcular novo valor → gravar o contador” não é atômico e não está protegido por mutex. O produtor e o consumidor podem ler o mesmo valor antigo; então um grava `valor + 1` e o outro `valor − 1`, apagando a atualização do primeiro. O contador deixa de corresponder às posições de fato ocupadas, o produtor pode sobrescrever uma amostra ainda não lida ou o consumidor pode encontrar uma posição vazia. `time.sleep(0)` agora ocorre em cada operação válida entre a leitura e a atualização do contador, abrindo uma janela para a troca de thread. Cada leitura vazia é contada; duplicatas contam IDs válidos repetidos. Nesta execução houve 2.216–2.680 leituras vazias e nenhuma duplicata válida, além de perdas. Os totais variam entre máquinas e execuções.
+A região crítica é a atualização coordenada do contador `ocupadas`, dos índices e das posições do buffer circular. O par “ler `ocupadas` → calcular novo valor → gravar o contador” não é atômico e não está protegido por mutex. O produtor e o consumidor podem ler o mesmo valor antigo; então um grava `valor + 1` e o outro `valor − 1`, apagando a atualização do primeiro. O contador deixa de corresponder às posições de fato ocupadas, o produtor pode sobrescrever uma amostra ainda não lida ou o consumidor pode encontrar uma posição vazia. `time.sleep(0)` ocorre em cada operação válida entre a leitura e a atualização do contador, abrindo uma janela para a troca de thread. Cada leitura vazia é contada; duplicatas contam IDs válidos repetidos. Nesta execução houve 2.297–2.516 leituras vazias e nenhuma duplicata válida, além de perdas. Os totais variam entre máquinas e execuções.
 
 **Resposta:** a região crítica é o estado compartilhado do buffer e do contador; sem exclusão mútua, atualizações concorrentes podem corromper a contagem, perder amostras ou levar a leituras vazias. A v1 mede duplicatas válidas separadamente e não as confunde com leituras vazias.
 
@@ -340,7 +340,7 @@ O produtor usa a ordem `wait(vazio) → wait(mutex) → inserir → post(mutex) 
 
 > O que aconteceu na versão 3, e por quê?
 
-A v3 inverteu a ordem do produtor para `wait(mutex) → wait(vazio)` e não usa barreira. Com o motor simulado um pouco mais lento, o produtor pode preencher o buffer e, na tentativa seguinte, obter `mutex` antes de esperar por `vazio`. O buffer está cheio, então o produtor bloqueia mantendo `mutex`; o consumidor pode retirar um sinal `cheio`, mas fica bloqueado tentando obter `mutex`. Só o consumidor poderia liberar uma posição, e ele não consegue entrar na seção protegida: forma-se o deadlock. Após 1 s, os timeouts encerram a simulação. A tentativa de consumir mais uma amostra e o timeout do produtor podem terminar quase ao mesmo tempo; por isso, dependendo do escalonamento, o resultado pode mostrar 0 ou 1 consumida. As demais amostras geradas continuam retidas no buffer e não são classificadas como perdidas.
+A v3 inverteu a ordem do produtor para `wait(mutex) → wait(vazio)` e não usa barreira. Com o motor simulado um pouco mais lento, o produtor pode preencher o buffer e, na tentativa seguinte, obter `mutex` antes de esperar por `vazio`. O buffer está cheio, então o produtor bloqueia mantendo `mutex`; o consumidor pode retirar um sinal `cheio`, mas fica bloqueado tentando obter `mutex`. Só o consumidor poderia liberar uma posição, e ele não consegue entrar na seção protegida: forma-se o deadlock. Após 1 s, os timeouts encerram a simulação; a consumidora não retira itens depois que o timeout foi sinalizado. Nesta rodada, as cinco amostras geradas ficaram retidas no buffer e não foram classificadas como perdidas.
 
 **Resposta:** a v3 pode travar naturalmente quando o buffer enche porque o produtor espera `vazio` segurando `mutex`, enquanto o consumidor precisa desse `mutex` para retirar um item. O timeout serve apenas para terminar a demonstração, não para corrigir o deadlock.
 

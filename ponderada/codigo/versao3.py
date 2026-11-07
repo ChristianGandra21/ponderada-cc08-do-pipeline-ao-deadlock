@@ -80,6 +80,10 @@ def executar(amostras, capacidade):
                 cheio.release()
                 marcar_travamento()
                 break
+            if parar.is_set():
+                mutex.release()
+                cheio.release()
+                break
             posicao = indice_leitura[0]
             identificador = buffer[posicao]
             buffer[posicao] = None

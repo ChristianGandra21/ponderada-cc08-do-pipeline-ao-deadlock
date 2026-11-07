@@ -1,5 +1,5 @@
 A4 — Versão 1: contador compartilhado sem sincronização
 N=5; amostras por execução=20000; execuções=3; timeout=1 s
-Execução 1: geradas=20000; consumidas=17697; perdidas=2302; retidas=1; não_geradas=0; duplicadas=0; leituras_vazias=2216; FIFO=NÃO; travou=NÃO
-Execução 2: geradas=20000; consumidas=17656; perdidas=2341; retidas=3; não_geradas=0; duplicadas=0; leituras_vazias=2680; FIFO=NÃO; travou=NÃO
-Execução 3: geradas=20000; consumidas=17910; perdidas=2089; retidas=1; não_geradas=0; duplicadas=0; leituras_vazias=2351; FIFO=NÃO; travou=NÃO
+Execução 1: geradas=20000; consumidas=17676; perdidas=2322; retidas=2; não_geradas=0; duplicadas=0; leituras_vazias=2297; FIFO=NÃO; travou=SIM
+Execução 2: geradas=20000; consumidas=17658; perdidas=2341; retidas=1; não_geradas=0; duplicadas=0; leituras_vazias=2516; FIFO=NÃO; travou=SIM
+Execução 3: geradas=20000; consumidas=17567; perdidas=2433; retidas=0; não_geradas=0; duplicadas=0; leituras_vazias=2498; FIFO=NÃO; travou=SIM
