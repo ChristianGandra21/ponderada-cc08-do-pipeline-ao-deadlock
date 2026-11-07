@@ -1,0 +1,5 @@
+A4 — Versão 2: semáforos vazio, cheio e mutex
+N=5; amostras por execução=20000; execuções=3; timeout=1 s; atraso simulado do motor=0.1 ms
+Execução 1: geradas=20000; consumidas=20000; perdidas=0; retidas=0; não_geradas=0; duplicadas=0; leituras_vazias=0; FIFO=OK; travou=NÃO
+Execução 2: geradas=20000; consumidas=20000; perdidas=0; retidas=0; não_geradas=0; duplicadas=0; leituras_vazias=0; FIFO=OK; travou=NÃO
+Execução 3: geradas=20000; consumidas=20000; perdidas=0; retidas=0; não_geradas=0; duplicadas=0; leituras_vazias=0; FIFO=OK; travou=NÃO

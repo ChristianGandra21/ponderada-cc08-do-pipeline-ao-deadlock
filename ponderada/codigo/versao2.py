@@ -1,32 +1,25 @@
 #!/usr/bin/env python3
-"""A4 - versão 2: buffer circular protegido por três semáforos.
+"""A4 — versão 2: buffer circular protegido por vazio, cheio e mutex."""
 
-A chamada padrão executa três tentativas de 20.000 amostras com N=5.
-"""
-
-import argparse
 import threading
+import time
 
-N_BUFFER = 5
-AMOSTRAS_PADRAO = 20_000
-EXECUCOES_PADRAO = 3
-TIMEOUT_CONSUMIDOR_S = 1.0
+from common import ATRASO_MOTOR_S, TIMEOUT_CONSUMIDOR_S, executar_rodadas, resumir
 
 
-def executar(amostras, capacidade, timeout_s):
-    """Executa uma tentativa usando vazio, cheio e mutex.
+def executar(amostras, capacidade):
+    """Executa produtor-consumidor com semáforos na ordem segura.
 
     Args:
         amostras: Quantidade de IDs que o produtor tentará gerar.
-        capacidade: Quantidade de posições do buffer circular.
-        timeout_s: Segundos sem receber amostra antes de marcar travamento.
+        capacidade: Número de posições do buffer circular.
 
     Returns:
-        Dicionário com amostras geradas/consumidas, perdas, duplicatas e timeout.
+        Métricas incluindo integridade FIFO e estado final do buffer.
 
     Funcionamento:
-        vazio controla posições livres, cheio controla itens disponíveis e
-        mutex protege o buffer e os índices durante cada operação.
+        O produtor espera vazio antes de mutex. O consumidor espera cheio
+        antes de mutex. O motor leva 0,1 ms por item no modelo da simulação.
     """
     buffer = [None] * capacidade
     vazio = threading.Semaphore(capacidade)
@@ -36,25 +29,26 @@ def executar(amostras, capacidade, timeout_s):
     indice_leitura = [0]
     geradas = []
     consumidas = []
+    leituras_vazias = [0]
     parar = threading.Event()
     produtor_finalizado = threading.Event()
     travou = threading.Event()
 
     def marcar_travamento():
-        """Registra o timeout e solicita que as duas threads encerrem."""
+        """Registra timeout e solicita encerramento das threads."""
         travou.set()
         parar.set()
 
     def produtor():
-        """Gera amostras com ordem vazio -> mutex e publica cheio."""
+        """Publica amostras usando vazio → mutex → inserir → cheio."""
         try:
             for identificador in range(amostras):
                 if parar.is_set():
                     break
-                if not vazio.acquire(timeout=timeout_s):
+                if not vazio.acquire(timeout=TIMEOUT_CONSUMIDOR_S):
                     marcar_travamento()
                     break
-                if not mutex.acquire(timeout=timeout_s):
+                if not mutex.acquire(timeout=TIMEOUT_CONSUMIDOR_S):
                     vazio.release()
                     marcar_travamento()
                     break
@@ -68,13 +62,13 @@ def executar(amostras, capacidade, timeout_s):
             produtor_finalizado.set()
 
     def consumidor():
-        """Consome itens e detecta um segundo sem nova amostra."""
+        """Retira itens em FIFO e registra qualquer posição vazia observada."""
         while len(consumidas) < amostras and not parar.is_set():
-            if not cheio.acquire(timeout=timeout_s):
+            if not cheio.acquire(timeout=TIMEOUT_CONSUMIDOR_S):
                 if not produtor_finalizado.is_set() or len(consumidas) < len(geradas):
                     marcar_travamento()
                 break
-            if not mutex.acquire(timeout=timeout_s):
+            if not mutex.acquire(timeout=TIMEOUT_CONSUMIDOR_S):
                 cheio.release()
                 marcar_travamento()
                 break
@@ -84,8 +78,11 @@ def executar(amostras, capacidade, timeout_s):
             indice_leitura[0] = (posicao + 1) % capacidade
             mutex.release()
             vazio.release()
-            if identificador is not None:
+            if identificador is None:
+                leituras_vazias[0] += 1
+            else:
                 consumidas.append(identificador)
+                time.sleep(ATRASO_MOTOR_S)
 
     thread_produtor = threading.Thread(target=produtor, name='produtor')
     thread_consumidor = threading.Thread(target=consumidor, name='consumidor')
@@ -94,42 +91,18 @@ def executar(amostras, capacidade, timeout_s):
     thread_produtor.join()
     thread_consumidor.join()
 
-    unicas = set(consumidas)
-    geradas_unicas = set(geradas)
-    return {
-        'geradas': len(geradas_unicas),
-        'consumidas': len(consumidas),
-        'perdidas': len(geradas_unicas - unicas),
-        'duplicadas': max(0, len(consumidas) - len(unicas)),
-        'travou': travou.is_set(),
-    }
-
-
-def imprimir_resultado(numero, resultado):
-    """Imprime os contadores da tentativa em uma linha legível."""
-    estado = 'SIM' if resultado['travou'] else 'NÃO'
-    print(
-        f"Execução {numero}: geradas={resultado['geradas']}; "
-        f"consumidas={resultado['consumidas']}; perdidas={resultado['perdidas']}; "
-        f"duplicadas={resultado['duplicadas']}; travou={estado}"
+    return resumir(
+        amostras, geradas, consumidas, buffer,
+        leituras_vazias=leituras_vazias[0], travou=travou.is_set()
     )
 
 
 def main():
-    """Lê opções CLI e executa a quantidade configurada de tentativas."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--samples', type=int, default=AMOSTRAS_PADRAO,
-                        help='amostras que o produtor tentará gerar (padrão: 20000)')
-    parser.add_argument('--runs', type=int, default=EXECUCOES_PADRAO,
-                        help='quantidade de execuções (padrão: 3)')
-    args = parser.parse_args()
-    if args.samples < 1 or args.runs < 1:
-        parser.error('--samples e --runs precisam ser positivos')
-    print('A4 — Versão 2: semáforos vazio, cheio e mutex')
-    print(f'N={N_BUFFER}; amostras por execução={args.samples}; execuções={args.runs}')
-    for numero in range(1, args.runs + 1):
-        resultado = executar(args.samples, N_BUFFER, TIMEOUT_CONSUMIDOR_S)
-        imprimir_resultado(numero, resultado)
+    """Executa as rodadas padrão da versão com semáforos."""
+    executar_rodadas(
+        2, 'semáforos vazio, cheio e mutex', executar,
+        atraso_motor_s=ATRASO_MOTOR_S
+    )
 
 
 if __name__ == '__main__':

@@ -87,6 +87,8 @@ Conta: T_pior = 4,482 ms
 
 **Resposta:** **AMAT = 10 ciclos/acesso; CPI efetivo = 12,7; T_V = 1,482 ms; pior caso = 4,482 ms < 5 ms, atende**, com folga de 0,518 ms (10,4%). O tempo de processamento usa o CPI calculado pela taxa média de faltas; o atraso máximo do SO foi somado conforme pedido.
 
+A margem da V é estreita: restam apenas **0,518 ms** para qualquer atraso adicional não incluído nesta estimativa. Como o Linux pode interromper a tarefa por até 3 ms, o escalonamento precisa ser controlado e medido no hardware final; atender ao cálculo não substitui a validação do tempo de resposta real.
+
 ### A1.3 Plataforma H com DSP: Lei de Amdahl
 
 > O time oferece um acelerador DSP para a Plataforma H que executa o filtro 5 vezes mais rápido. O filtro é 60% do tempo de processamento. Use a Lei de Amdahl para calcular o speedup global e o novo tempo por amostra. Agora atende?
@@ -115,18 +117,18 @@ Conta: T_novo ≈ 2,275 ms
 
 > Em até cinco linhas: por que a Plataforma V precisa de cache e a H funciona sem? Use a ideia de gargalo de Von Neumann.
 
-- A V usa organização Von Neumann e faz 1,3 acessos à memória por instrução; sem cache, todos os acessos pagariam a latência da DRAM.
-- Sem cache: CPI = 1,0 + (1,3 × 120) = 157; tempo = (140.000 × 157) ÷ 1,2 GHz ≈ 18,317 ms, acima de 5 ms.
-- Com cache, CPI cai para 12,7 e o tempo médio estimado cai para 1,482 ms; o caminho compartilhado de instruções e dados continua sendo um gargalo.
-- A H usa Harvard e SRAM interna de 1 ciclo, então não tem a grande diferença de latência da DRAM externa que a cache da V precisa compensar.
+- Na V, instruções e dados usam o mesmo caminho até a memória: eles disputam esse caminho, formando o gargalo de Von Neumann. Há 1,3 acessos à memória por instrução.
+- Sem cache, a DRAM acrescenta muitas esperas: CPI = `1 + (1,3 × 120) = 157` e o tempo estimado é **18,317 ms**, acima de 5 ms.
+- A cache mantém instruções e dados usados com frequência perto do processador e esconde parte da latência da DRAM: o CPI médio cai para 12,7 e o tempo para 1,482 ms.
+- A H separa os caminhos de instruções e dados (Harvard) e usa SRAM interna de 1 ciclo, sem a longa espera pela DRAM externa que torna a cache necessária na V.
 
 ### A1.5 Evidência das caches da máquina
 
 > Cole o print das caches do seu computador (Linux: lscpu; macOS: sysctl -a | grep cachesize; Windows: aba Caches do CPU-Z). A sua L1 é dividida em instruções e dados? Então o seu computador é Von Neumann ou Harvard? Justifique.
 
-![Registro da saída do comando lscpu com os tamanhos das caches L1, L2 e L3.](img/cache-lscpu.png)
+**Registro da execução:** rodei `lscpu` sem filtro em Linux (Ubuntu 24.04), no equipamento identificado como `Notebook-0536`, com processador Intel Core i5-1345U de 13ª geração. A saída integral está em [`lscpu-completo.txt`](img/lscpu-completo.txt). Ela informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância). Os totais de L1 somam as 10 instâncias dos núcleos (2 de desempenho e 8 de eficiência). O comando não reporta uma linha de fabricante do hipervisor; por isso, não concluo apenas por essa saída que a execução foi nativa ou em máquina virtual.
 
-**O que o print mostra:** rodei `lscpu` em Linux nativo (Ubuntu; sem WSL ou hipervisor detectado). O processador é um Intel Core i5-1345U de 13ª geração. A saída informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância). Os totais de L1 somam as 10 instâncias dos núcleos (2 de desempenho e 8 de eficiência).
+**Evidência visual pendente:** o arquivo de texto registra a saída real, mas não é uma captura de tela do terminal. A imagem anterior era uma renderização da saída e foi removida para não apresentá-la como screenshot real.
 
 **A L1 é dividida?** Sim. Há caches L1 separadas para dados (L1d) e instruções (L1i).
 
@@ -214,6 +216,8 @@ Os `addi` só alteram ponteiros usados pelos `lw`, que já foram executados ante
 
 > Proponha quais tarefas serão threads de um mesmo processo e quais serão processos separados. Justifique considerando compartilhamento de memória, custo de criação e troca de contexto e isolamento de falhas.
 
+Para A3, A4 e A5, assumo a **Plataforma V**, o SoC que executa Linux. A Plataforma H é um microcontrolador sem sistema operacional e não oferece a organização de processos e threads usada nesta proposta.
+
 Manteria leitura do sensor, processamento e vibração como threads persistentes do processo `controle_tato`, formando o **caminho crítico de tempo real**. O BLE roda em um processo separado. Nenhuma thread é criada por amostra.
 
 | Tarefa | Organização proposta | Motivo principal |
@@ -276,37 +280,33 @@ Pela A1, o processamento na V leva 1,482 ms em média a cada período de 10 ms: 
 
 > Execute cada versão três vezes com 20.000 amostras e o seu buffer de N posições. Registre consumidas, perdidas, duplicadas e travamento.
 
-Usei `N = 3 + (2 mod 5) = 5`. Cada comando padrão executa três rodadas de 20.000 amostras. Em cada rodada, **perdidas** é o número de IDs gerados que não foram consumidos; **duplicadas** conta consumos adicionais de IDs repetidos. Na v3, também apresento quantas foram geradas para deixar claro que o deadlock interrompeu a produção antes das 20.000.
+Usei `N = 3 + (2 mod 5) = 5`. Rodei as versões em Python 3.12.3, Ubuntu 24.04, Linux x86_64, Intel Core i5-1345U. As versões 2 e 3 simulam 0,1 ms de trabalho do motor por amostra; a v3 não usa barreira. Cada comando padrão faz três rodadas de 20.000 amostras. O escalonamento varia entre máquinas e execuções.
 
-| Versão | Execução | Geradas | Consumidas | Perdidas | Duplicadas | Travou? |
-| --- | ---: | ---: | ---: | ---: | ---: | :---: |
-| 1 — sem sincronização | 1 | 20.000 | 19.908 | 92 | 0 | Não |
-| 1 — sem sincronização | 2 | 20.000 | 19.923 | 77 | 0 | Não |
-| 1 — sem sincronização | 3 | 20.000 | 19.856 | 144 | 0 | Não |
-| 2 — semáforos | 1 | 20.000 | 20.000 | 0 | 0 | Não |
-| 2 — semáforos | 2 | 20.000 | 20.000 | 0 | 0 | Não |
-| 2 — semáforos | 3 | 20.000 | 20.000 | 0 | 0 | Não |
-| 3 — ordem trocada | 1 | 5 | 1 | 4 | 0 | Sim |
-| 3 — ordem trocada | 2 | 5 | 1 | 4 | 0 | Sim |
-| 3 — ordem trocada | 3 | 5 | 1 | 4 | 0 | Sim |
+**Perdidas** são IDs gerados que não foram consumidos e não estavam no buffer ao encerrar a rodada. **Retidas** são IDs ainda no buffer. **Não geradas** são IDs do total solicitado que o produtor não chegou a publicar. **Leituras vazias** contam tentativas em que o consumidor acreditou haver item, mas encontrou `None`. A integridade FIFO da v2 é verificada comparando a sequência consumida com todos os IDs esperados, de 0 a 19.999.
 
-Na v1, os 20.000 IDs foram gerados em cada rodada, mas o contador compartilhado perdeu atualizações e 77–144 amostras não chegaram ao consumidor. Na v2, os três semáforos preservaram todas as amostras nas três rodadas. Na v3, cada tentativa travou quando o buffer de cinco posições encheu; por isso só cinco amostras foram geradas, quatro ficaram sem consumo, e as outras 19.995 nem chegaram a ser produzidas.
+| Versão | Execução | Geradas | Consumidas | Perdidas | Retidas | Não geradas | Duplicadas | Leituras vazias | FIFO íntegra? | Travou? |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | :---: | :---: |
+| 1 — sem sincronização | 1 | 20.000 | 17.697 | 2.302 | 1 | 0 | 0 | 2.216 | Não | Não |
+| 1 — sem sincronização | 2 | 20.000 | 17.656 | 2.341 | 3 | 0 | 0 | 2.680 | Não | Não |
+| 1 — sem sincronização | 3 | 20.000 | 17.910 | 2.089 | 1 | 0 | 0 | 2.351 | Não | Não |
+| 2 — semáforos | 1 | 20.000 | 20.000 | 0 | 0 | 0 | 0 | 0 | Sim | Não |
+| 2 — semáforos | 2 | 20.000 | 20.000 | 0 | 0 | 0 | 0 | 0 | Sim | Não |
+| 2 — semáforos | 3 | 20.000 | 20.000 | 0 | 0 | 0 | 0 | 0 | Sim | Não |
+| 3 — ordem trocada | 1 | 5 | 1 | 0 | 4 | 19.995 | 0 | 0 | Não | Sim |
+| 3 — ordem trocada | 2 | 5 | 1 | 0 | 4 | 19.995 | 0 | 0 | Não | Sim |
+| 3 — ordem trocada | 3 | 5 | 1 | 0 | 4 | 19.995 | 0 | 0 | Não | Sim |
 
-**Evidências das saídas capturadas:**
+Na v1, o `sleep(0)` em cada operação válida expôs a corrida: além das amostras perdidas, o consumidor fez milhares de leituras vazias. Nesta rodada, houve 2.089–2.341 perdas e 2.216–2.680 leituras vazias; os números variam entre execuções. Na v2, as três execuções consumiram todos os IDs na ordem exata, sem perda, retenção, duplicata ou leitura vazia. Na v3, o deadlock foi detectado em todas as rodadas; no encerramento destas execuções, 1 amostra foi consumida e 4 ficaram retidas no buffer. As outras 19.995 não foram geradas. As quatro retidas **não são amostras perdidas**. Uma corrida entre os timeouts pode fazer outra execução terminar com 0 consumidas e 5 retidas.
 
-![Saída capturada das três execuções da versão 1, sem sincronização.](img/a4-versao1.png)
-
-![Saída capturada das três execuções da versão 2, com os três semáforos.](img/a4-versao2.png)
-
-![Saída capturada das três execuções da versão 3, com deadlock reproduzido.](img/a4-versao3.png)
+**Saídas de terminal registradas:** os arquivos `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt` guardam a saída textual integral dos comandos executados. Eles documentam a execução, mas não substituem capturas de tela reais do terminal.
 
 ### A4.2 Região crítica e corrida na versão 1
 
 > Qual é a região crítica da versão 1, e por que ela perde ou duplica amostras?
 
-A região crítica é a atualização coordenada do contador `ocupadas`, dos índices e das posições do buffer circular. O par “ler `ocupadas` → calcular novo valor → gravar o contador” não é atômico e não está protegido por mutex. O produtor e o consumidor podem ler o mesmo valor antigo; então um grava `valor + 1` e o outro `valor − 1`, apagando a atualização do primeiro. O contador deixa de corresponder às posições de fato ocupadas, o produtor pode sobrescrever uma amostra ainda não lida ou o consumidor pode encontrar uma posição vazia. `time.sleep(0)` entre leitura e escrita oferece uma oportunidade de troca de thread; a espera ocupada continua consultando o contador sem bloquear em semáforo. Nas três execuções observadas houve perda, mas nenhuma duplicata.
+A região crítica é a atualização coordenada do contador `ocupadas`, dos índices e das posições do buffer circular. O par “ler `ocupadas` → calcular novo valor → gravar o contador” não é atômico e não está protegido por mutex. O produtor e o consumidor podem ler o mesmo valor antigo; então um grava `valor + 1` e o outro `valor − 1`, apagando a atualização do primeiro. O contador deixa de corresponder às posições de fato ocupadas, o produtor pode sobrescrever uma amostra ainda não lida ou o consumidor pode encontrar uma posição vazia. `time.sleep(0)` agora ocorre em cada operação válida entre a leitura e a atualização do contador, abrindo uma janela para a troca de thread. Cada leitura vazia é contada; duplicatas contam IDs válidos repetidos. Nesta execução houve 2.216–2.680 leituras vazias e nenhuma duplicata válida, além de perdas. Os totais variam entre máquinas e execuções.
 
-**Resposta:** a região crítica é o estado compartilhado do buffer e do contador; sem exclusão mútua, atualizações concorrentes podem corromper a contagem e causar perda ou repetição de amostras.
+**Resposta:** a região crítica é o estado compartilhado do buffer e do contador; sem exclusão mútua, atualizações concorrentes podem corromper a contagem, perder amostras ou levar a leituras vazias. A v1 mede duplicatas válidas separadamente e não as confunde com leituras vazias.
 
 ### A4.3 Garantia de cada semáforo na versão 2
 
@@ -316,7 +316,7 @@ A região crítica é a atualização coordenada do contador `ocupadas`, dos ín
 - `cheio`, inicializado em `0`: conta amostras disponíveis. O consumidor faz `wait(cheio)` antes de retirar, então não lê uma posição sem item.
 - `mutex`, inicializado em `1`: permite que apenas uma thread por vez altere o buffer e os índices durante a operação.
 
-O produtor usa a ordem `wait(vazio) → wait(mutex) → inserir → post(mutex) → post(cheio)`. O consumidor usa `wait(cheio) → wait(mutex) → retirar → post(mutex) → post(vazio)`. As esperas por espaço ou item acontecem antes de adquirir o mutex.
+O produtor usa a ordem `wait(vazio) → wait(mutex) → inserir → post(mutex) → post(cheio)`. O consumidor usa `wait(cheio) → wait(mutex) → retirar → post(mutex) → post(vazio)`. As esperas por espaço ou item acontecem antes de adquirir o mutex. Para verificar a integridade, o programa compara a lista consumida com exatamente `0, 1, 2, ..., 19.999`; as três execuções produziram essa sequência completa, sem lacunas nem inversões.
 
 **Resposta:** `vazio` protege a capacidade, `cheio` protege a disponibilidade de itens e `mutex` protege a seção crítica do buffer e dos índices.
 
@@ -324,11 +324,13 @@ O produtor usa a ordem `wait(vazio) → wait(mutex) → inserir → post(mutex) 
 
 > O que aconteceu na versão 3, e por quê?
 
-A v3 inverteu a ordem do produtor para `wait(mutex) → wait(vazio)`. Para reproduzir o caso, a barreira de demonstração só libera o consumidor depois que o buffer fica cheio e o produtor já detém `mutex`. O produtor passa a esperar uma posição `vazio`; o consumidor obtém um sinal `cheio`, mas espera pelo `mutex` que o produtor mantém. Só o consumidor poderia retirar um item e sinalizar `vazio`, e ele não consegue entrar na seção protegida. Forma-se a espera circular; após 1 s sem concluir a operação, o código encerra a tentativa e registra o travamento. A barreira torna o escalonamento do exemplo reproduzível; ela não muda a ordem de semáforos que causa o problema.
+A v3 inverteu a ordem do produtor para `wait(mutex) → wait(vazio)` e não usa barreira. Com o motor simulado um pouco mais lento, o produtor pode preencher o buffer e, na tentativa seguinte, obter `mutex` antes de esperar por `vazio`. O buffer está cheio, então o produtor bloqueia mantendo `mutex`; o consumidor pode retirar um sinal `cheio`, mas fica bloqueado tentando obter `mutex`. Só o consumidor poderia liberar uma posição, e ele não consegue entrar na seção protegida: forma-se o deadlock. Após 1 s, os timeouts encerram a simulação. A tentativa de consumir mais uma amostra e o timeout do produtor podem terminar quase ao mesmo tempo; por isso, dependendo do escalonamento, o resultado pode mostrar 0 ou 1 consumida. As demais amostras geradas continuam retidas no buffer e não são classificadas como perdidas.
 
-**Resposta:** a v3 trava porque o produtor segura `mutex` enquanto espera `vazio`, impedindo o consumidor de retirar um item e liberar o espaço de que o produtor precisa.
+**Resposta:** a v3 pode travar naturalmente quando o buffer enche porque o produtor espera `vazio` segurando `mutex`, enquanto o consumidor precisa desse `mutex` para retirar um item. O timeout serve apenas para terminar a demonstração, não para corrigir o deadlock.
 
 ## A5. Deadlock
+
+O cenário de software da A5 também assume a Plataforma V/Linux. O ciclo é um modelo defeituoso com semáforos nomeados compartilhados entre processos; na arquitetura recomendada da A3, o processo BLE não espera pelo I2C enquanto mantém `ble`.
 
 ### A5.1 Sequência de execução e grafo de alocação
 
@@ -388,10 +390,12 @@ O ciclo `i2c → thread_sensor → log → thread_log → ble → thread_config 
 
 ## Memorando ao conselho da Tato
 
-**Recomendo adiar o lançamento por dois meses para corrigir e testar o deadlock antes de colocar as pulseiras em campo.** Aceito perder o edital das primeiras 2.000 unidades e esperar pelo próximo financiamento semelhante, previsto para cerca de seis meses. Esse custo recai sobre a empresa e também atrasa o acesso dos usuários ao produto; aceito-o porque uma falha conhecida pode interromper o aviso que ajuda a perceber obstáculos.
+**Recomendo adiar o lançamento por dois meses para corrigir e testar o deadlock antes de colocar as pulseiras em campo.** Essa decisão abre mão do edital para 2.000 unidades e do acesso imediato dos usuários ao produto; se o próximo financiamento semelhante só vier em seis meses, eles também podem esperar esse período. A empresa perde esse financiamento e precisa sustentar a equipe durante a espera. O enunciado não informa o valor do edital, então não atribuo um custo em reais.
 
-O enunciado estima um travamento a cada 10.000 horas de uso. Para dimensionar o risco do lançamento, suponho, apenas como exemplo, que cada uma das 2.000 pulseiras seja usada uma hora por dia durante 21 dias: isso soma 42.000 horas de uso. Modelando os travamentos como eventos aleatórios com taxa constante, a probabilidade de ao menos um na frota é `1 − e^(−42.000/10.000) ≈ 98,5%`. Essa estimativa não é a probabilidade para cada usuário nem uma previsão baseada em horas reais de uso.
+O melhor argumento para lançar agora é a baixa frequência estimada por dispositivo e a recuperação pelo watchdog. A taxa de um travamento a cada 10.000 horas corresponde, com uso de 8 horas por dia, a um intervalo médio de cerca de **3,4 anos por pulseira**; sob uma taxa constante e aleatória, o risco de ao menos um travamento por usuário em um ano é `1 − e^(−2.920/10.000) ≈` **25%**. Para 2.000 pulseiras usadas 8 horas por dia, a frota soma 16.000 horas de uso por dia: são **1,6 travamentos esperados por dia** (cerca de 80% de chance de ao menos um, se os eventos forem independentes e aleatórios). Cada ocorrência deixa uma pessoa sem vibração por cerca de **4 segundos**, ou 400 intervalos de amostragem, mesmo com o pulso longo de aviso.
 
-Na Parte A, calculei que a Plataforma H processa uma amostra em **4,375 ms**, ou **0,625 ms abaixo** do limite de 5 ms. Esse resultado descreve o funcionamento normal e não elimina o risco do deadlock. Na A4, a versão 3 travou depois de produzir 5 amostras: apenas 1 foi consumida e 4 foram perdidas. Esse teste demonstra a interrupção possível, mas não mede sua frequência em campo. O watchdog avisaria a pessoa com um pulso longo e reiniciaria a pulseira, mas deixaria cerca de **quatro segundos sem vibração**, aproximadamente 400 intervalos de amostragem de 10 ms.
+Assumo a Plataforma V/Linux usada na A3–A5. Na A1.2, o pior caso estimado da V é **4,482 ms**, com apenas **0,518 ms** de margem até o limite; isso vale durante o processamento normal e não evita o deadlock. A A4 demonstra que a ordem incorreta dos semáforos pode congelar o fluxo, mas não mede a taxa de ocorrência em campo. A V permite atualização OTA, porém a atualização posterior não protege as pessoas durante o período anterior à correção. Se a produção fosse na H, a correção exigiria atendimento com cabo às unidades em campo.
 
-Adiar evita expor usuários a essa interrupção conhecida e permite validar também a segurança do BLE antes do lançamento, incluindo comandos malformados e o isolamento do processo BLE. Eu reconsideraria lançar antes do prazo de três semanas se a equipe corrigisse o deadlock e demonstrasse, em testes de concorrência que reproduzam a disputa pelos recursos e em testes na pulseira, que nenhuma amostra ultrapassa 5 ms e que a vibração continua disponível durante a falha e a recuperação. Até essa validação, recomendo adiar.
+Adiar também tem custo de segurança: até o lançamento, os usuários ficam sem essa ferramenta de orientação. Lançar agora, por outro lado, transfere a eles o risco conhecido de ficar sem vibração e o risco de uma correção apressada introduzir novos defeitos. O BLE recebe comandos externos; o adiamento permite validar entradas malformadas e o isolamento desse processo antes da exposição em campo.
+
+Eu mudaria o plano financeiro se o edital confirmasse por escrito uma extensão de dois meses, preservando o financiamento e permitindo entregar somente após testes de concorrência, recuperação e processamento dentro de 5 ms. Sem essa extensão, mantenho a recomendação de adiar; não considero um watchdog abaixo de 1 segundo suficiente, pois ainda deixaria cerca de 100 amostras sem vibração.
