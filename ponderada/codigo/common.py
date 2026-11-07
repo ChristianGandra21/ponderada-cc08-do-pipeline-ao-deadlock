@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Funções compartilhadas para as três simulações da questão A4."""
+"""Funções compartilhadas de métricas, argumentos e relatórios das versões A4.
+
+Importado por versao1.py, versao2.py e versao3.py; execute uma dessas versões
+da raiz do repositório, por exemplo: python3 ponderada/codigo/versao2.py.
+"""
 
 import argparse
 

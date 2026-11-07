@@ -126,9 +126,9 @@ Conta: T_novo ≈ 2,275 ms
 
 > Cole o print das caches do seu computador (Linux: lscpu; macOS: sysctl -a | grep cachesize; Windows: aba Caches do CPU-Z). A sua L1 é dividida em instruções e dados? Então o seu computador é Von Neumann ou Harvard? Justifique.
 
-**Registro da execução:** rodei `lscpu` sem filtro em Linux (Ubuntu 24.04), no equipamento identificado como `Notebook-0536`, com processador Intel Core i5-1345U de 13ª geração. A saída integral está em [`lscpu-completo.txt`](img/lscpu-completo.txt). Ela informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância). Os totais de L1 somam as 10 instâncias dos núcleos (2 de desempenho e 8 de eficiência). O comando não reporta uma linha de fabricante do hipervisor; por isso, não concluo apenas por essa saída que a execução foi nativa ou em máquina virtual.
+**Registro da execução:** rodei `lscpu` sem filtro em Linux (Ubuntu 24.04), no equipamento identificado como `Notebook-0536`, com processador Intel Core i5-1345U de 13ª geração. A captura real do terminal aparece abaixo; a saída integral está em [`lscpu-completo.txt`](img/lscpu-completo.txt). Ela informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância). Os totais de L1 somam as 10 instâncias dos núcleos (2 de desempenho e 8 de eficiência). O comando não reporta uma linha de fabricante do hipervisor; por isso, não concluo apenas por essa saída que a execução foi nativa ou em máquina virtual.
 
-**Evidência visual pendente:** o arquivo de texto registra a saída real, mas não é uma captura de tela do terminal. A imagem anterior era uma renderização da saída e foi removida para não apresentá-la como screenshot real.
+![Captura real do terminal com o comando lscpu e os tamanhos das caches.](img/lscpu.png)
 
 **A L1 é dividida?** Sim. Há caches L1 separadas para dados (L1d) e instruções (L1i).
 
@@ -298,7 +298,13 @@ Usei `N = 3 + (2 mod 5) = 5`. Rodei as versões em Python 3.12.3, Ubuntu 24.04, 
 
 Na v1, o `sleep(0)` em cada operação válida expôs a corrida: além das amostras perdidas, o consumidor fez milhares de leituras vazias. Nesta rodada, houve 2.089–2.341 perdas e 2.216–2.680 leituras vazias; os números variam entre execuções. Na v2, as três execuções consumiram todos os IDs na ordem exata, sem perda, retenção, duplicata ou leitura vazia. Na v3, o deadlock foi detectado em todas as rodadas; no encerramento destas execuções, 1 amostra foi consumida e 4 ficaram retidas no buffer. As outras 19.995 não foram geradas. As quatro retidas **não são amostras perdidas**. Uma corrida entre os timeouts pode fazer outra execução terminar com 0 consumidas e 5 retidas.
 
-**Saídas de terminal registradas:** os arquivos `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt` guardam a saída textual integral dos comandos executados. Eles documentam a execução, mas não substituem capturas de tela reais do terminal.
+**Capturas das execuções:** as imagens abaixo mostram três execuções adicionais de cada versão; os números podem diferir da tabela porque variam entre execuções. As saídas textuais das rodadas originalmente registradas estão em `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt`.
+
+![Captura real de uma execução da versão 1 da A4.](img/a4-versao1.png)
+
+![Captura real de uma execução da versão 2 da A4.](img/a4-versao2.png)
+
+![Captura real de uma execução da versão 3 da A4.](img/a4-versao3.png)
 
 ### A4.2 Região crítica e corrida na versão 1
 
@@ -394,8 +400,10 @@ O ciclo `i2c → thread_sensor → log → thread_log → ble → thread_config 
 
 O melhor argumento para lançar agora é a baixa frequência estimada por dispositivo e a recuperação pelo watchdog. A taxa de um travamento a cada 10.000 horas corresponde, com uso de 8 horas por dia, a um intervalo médio de cerca de **3,4 anos por pulseira**; sob uma taxa constante e aleatória, o risco de ao menos um travamento por usuário em um ano é `1 − e^(−2.920/10.000) ≈` **25%**. Para 2.000 pulseiras usadas 8 horas por dia, a frota soma 16.000 horas de uso por dia: são **1,6 travamentos esperados por dia** (cerca de 80% de chance de ao menos um, se os eventos forem independentes e aleatórios). Cada ocorrência deixa uma pessoa sem vibração por cerca de **4 segundos**, ou 400 intervalos de amostragem, mesmo com o pulso longo de aviso.
 
-Assumo a Plataforma V/Linux usada na A3–A5. Na A1.2, o pior caso estimado da V é **4,482 ms**, com apenas **0,518 ms** de margem até o limite; isso vale durante o processamento normal e não evita o deadlock. A A4 demonstra que a ordem incorreta dos semáforos pode congelar o fluxo, mas não mede a taxa de ocorrência em campo. A V permite atualização OTA, porém a atualização posterior não protege as pessoas durante o período anterior à correção. Se a produção fosse na H, a correção exigiria atendimento com cabo às unidades em campo.
+Assumo a Plataforma V/Linux usada na A3–A5. Na A1.2, o pior caso estimado da V é **4,482 ms**, com apenas **0,518 ms** de margem até o limite. Essa folga restringe quanto tempo pode ser acrescentado por mitigação, comunicação ou contenção de recursos no caminho de cada amostra; o cálculo normal, por si só, não evita o deadlock. A A4 demonstra que a ordem incorreta dos semáforos pode congelar o fluxo, mas não mede a taxa de ocorrência em campo. A V permite atualização OTA, porém a atualização posterior não protege as pessoas durante o período anterior à correção. Se a produção fosse na H, a correção exigiria atendimento com cabo às unidades em campo.
+
+Como referência de escala, o custo de hardware para 2.000 unidades é de **R$ 140 mil na V** (2.000 × R$ 70) ou **R$ 44 mil na H sem DSP** (2.000 × R$ 22). Esses valores ajudam a dimensionar o lote, mas não substituem o valor do edital, que não foi informado.
 
 Adiar também tem custo de segurança: até o lançamento, os usuários ficam sem essa ferramenta de orientação. Lançar agora, por outro lado, transfere a eles o risco conhecido de ficar sem vibração e o risco de uma correção apressada introduzir novos defeitos. O BLE recebe comandos externos; o adiamento permite validar entradas malformadas e o isolamento desse processo antes da exposição em campo.
 
-Eu mudaria o plano financeiro se o edital confirmasse por escrito uma extensão de dois meses, preservando o financiamento e permitindo entregar somente após testes de concorrência, recuperação e processamento dentro de 5 ms. Sem essa extensão, mantenho a recomendação de adiar; não considero um watchdog abaixo de 1 segundo suficiente, pois ainda deixaria cerca de 100 amostras sem vibração.
+O melhor contra-argumento é lançar com watchdog e corrigir por OTA depois. Em 60 dias, a frota teria cerca de **96 travamentos esperados** (1,6 × 60), cada um com aproximadamente quatro segundos sem vibração; o OTA reduz o tempo até a correção, mas não elimina essas ocorrências nesse intervalo. Eu mudaria o plano financeiro se o edital confirmasse por escrito uma extensão de dois meses, preservando o financiamento e permitindo entregar somente após testes de concorrência, recuperação e processamento dentro de 5 ms. Sem essa extensão, mantenho a recomendação de adiar; não considero um watchdog abaixo de 1 segundo suficiente, pois ainda deixaria cerca de 100 amostras sem vibração.

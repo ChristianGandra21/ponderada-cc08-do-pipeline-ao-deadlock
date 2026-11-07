@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""A4 — versão 1: buffer circular com contador compartilhado sem mutex."""
+"""A4 v1: demonstra corrida no buffer circular sem mutex.
+
+Execute da raiz: python3 ponderada/codigo/versao1.py [--samples N --runs R].
+"""
 
 import threading
 import time

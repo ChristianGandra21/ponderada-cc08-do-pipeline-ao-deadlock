@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""A4 — versão 3: ordem trocada que pode causar deadlock sem barreira."""
+"""A4 v3: ordem trocada que pode causar deadlock quando o buffer enche.
+
+Execute da raiz: python3 ponderada/codigo/versao3.py [--samples N --runs R].
+"""
 
 import threading
 import time

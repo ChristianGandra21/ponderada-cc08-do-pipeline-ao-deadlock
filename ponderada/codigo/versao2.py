@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""A4 — versão 2: buffer circular protegido por vazio, cheio e mutex."""
+"""A4 v2: buffer circular correto com vazio, cheio e mutex.
+
+Execute da raiz: python3 ponderada/codigo/versao2.py [--samples N --runs R].
+"""
 
 import threading
 import time
