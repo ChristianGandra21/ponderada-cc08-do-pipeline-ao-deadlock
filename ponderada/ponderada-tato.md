@@ -128,7 +128,9 @@ Conta: T_novo ≈ 2,275 ms
 
 **Registro da execução:** rodei `lscpu` sem filtro em Linux (Ubuntu 24.04), no equipamento identificado como `Notebook-0536`, com processador Intel Core i5-1345U de 13ª geração. A captura real do terminal aparece abaixo; a saída integral está em [`lscpu-completo.txt`](img/lscpu-completo.txt). Ela informa L1d = 352 KiB (10 instâncias), L1i = 576 KiB (10 instâncias), L2 = 6,5 MiB (4 instâncias) e L3 = 12 MiB (1 instância). Os totais de L1 somam as 10 instâncias dos núcleos (2 de desempenho e 8 de eficiência). O comando não reporta uma linha de fabricante do hipervisor; por isso, não concluo apenas por essa saída que a execução foi nativa ou em máquina virtual.
 
-![Captura real do terminal com o comando lscpu e os tamanhos das caches.](img/lscpu.png)
+**Print do terminal:**
+
+![Print real do terminal com a saída do comando lscpu e os tamanhos das caches.](./img/lscpu.png)
 
 **A L1 é dividida?** Sim. Há caches L1 separadas para dados (L1d) e instruções (L1i).
 
@@ -298,13 +300,11 @@ Usei `N = 3 + (2 mod 5) = 5`. Rodei as versões em Python 3.12.3, Ubuntu 24.04, 
 
 Na v1, o `sleep(0)` em cada operação válida expôs a corrida: além das amostras perdidas, o consumidor fez milhares de leituras vazias. Nesta rodada, houve 2.089–2.341 perdas e 2.216–2.680 leituras vazias; os números variam entre execuções. Na v2, as três execuções consumiram todos os IDs na ordem exata, sem perda, retenção, duplicata ou leitura vazia. Na v3, o deadlock foi detectado em todas as rodadas; no encerramento destas execuções, 1 amostra foi consumida e 4 ficaram retidas no buffer. As outras 19.995 não foram geradas. As quatro retidas **não são amostras perdidas**. Uma corrida entre os timeouts pode fazer outra execução terminar com 0 consumidas e 5 retidas.
 
-**Capturas das execuções:** as imagens abaixo mostram três execuções adicionais de cada versão; os números podem diferir da tabela porque variam entre execuções. As saídas textuais das rodadas originalmente registradas estão em `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt`.
+**Print do terminal:** a captura conjunta abaixo mostra os comandos executados e as saídas das versões 1, 2 e 3, com três execuções de cada. Os números podem diferir da tabela porque variam entre execuções; as saídas das rodadas originalmente registradas estão em `a4-versao1-stdout.txt`, `a4-versao2-stdout.txt` e `a4-versao3-stdout.txt`.
 
-![Captura real de uma execução da versão 1 da A4.](img/a4-versao1.png)
+![Print real do terminal com a execução das versões 1, 2 e 3 da A4.](./img/a4-terminal-completo.png)
 
-![Captura real de uma execução da versão 2 da A4.](img/a4-versao2.png)
-
-![Captura real de uma execução da versão 3 da A4.](img/a4-versao3.png)
+Também deixei os recortes individuais em [versão 1](./img/a4-versao1.png), [versão 2](./img/a4-versao2.png) e [versão 3](./img/a4-versao3.png).
 
 ### A4.2 Região crítica e corrida na versão 1
 
